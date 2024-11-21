@@ -4,7 +4,7 @@ DB_CONTAINER = postgres_db
 
 # Default target
 .PHONY: all
-all: deps db.create start
+all: deps start
 
 # Update project dependencies
 .PHONY: deps
@@ -33,3 +33,28 @@ start:
 .PHONY: clean
 clean:
 	docker-compose down --volumes
+
+# Run Dialyzer for static analysis
+.PHONY: dialyzer
+dialyzer:
+	$(MIX) dialyzer
+
+# Run Credo for code style checks
+.PHONY: credo
+credo:
+	$(MIX) credo
+
+# Run Sobelow for security analysis
+.PHONY: sobelow
+sobelow:
+	$(MIX) sobelow
+
+# Run ExCoveralls to generate a coverage report
+.PHONY: coveralls
+coveralls:
+    # Set MIX_ENV to test to generate a coverage report for the test environment
+    MIX_ENV=test $(MIX) coveralls.html
+
+# Run CI pipeline locally
+.PHONY: ci
+ci: deps dialyzer credo sobelow coveralls
