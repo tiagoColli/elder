@@ -1,18 +1,10 @@
 # Elder
 
-To start your Phoenix server:
+Tickets sale plataform.
 
-  * Run `mix setup` to install and setup dependencies
-  * Start Phoenix endpoint with `mix phx.server` or inside IEx with `iex -S mix phx.server`
+## To run it:
+ * `make run`
 
-Now you can visit [`localhost:4000`](http://localhost:4000) from your browser.
-
-Ready to run in production? Please [check our deployment guides](https://hexdocs.pm/phoenix/deployment.html).
-
-## Learn more
-
-  * Official website: https://www.phoenixframework.org/
-  * Guides: https://hexdocs.pm/phoenix/overview.html
-  * Docs: https://hexdocs.pm/phoenix
-  * Forum: https://elixirforum.com/c/phoenix-forum
-  * Source: https://github.com/phoenixframework/phoenix
+## Development docs reference
+ * [DB](https://app.chartdb.io/diagrams/hcltwxq13rbq)
+ * [Context mapping](https://excalidraw.com/#json=xqbDR0JsXxMnUvs9zi0Io,diZW-EqqNqRqXiHQ4xi3UA)

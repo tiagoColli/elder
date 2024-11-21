@@ -3,8 +3,8 @@ MIX = docker-compose run --rm elder mix
 DB_CONTAINER = postgres_db
 
 # Default target
-.PHONY: all
-all: deps start
+.PHONY: run
+run: deps db.create start
 
 # Update project dependencies
 .PHONY: deps
@@ -16,6 +16,7 @@ deps:
 .PHONY: db.create
 db.create:
 	$(MIX) ecto.create
+	$(MIX) ecto.migrate
 
 # Reset the database (drop and create)
 .PHONY: db.reset
