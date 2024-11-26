@@ -1,3 +1,5 @@
+[![Coverage Status](https://coveralls.io/repos/github/tiagoColli/elder/badge.svg?branch=dev)](https://coveralls.io/github/tiagoColli/elder?branch=dev)
+
 # Elder
 
 To start your Phoenix server:
