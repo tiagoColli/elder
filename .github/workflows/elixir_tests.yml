@@ -13,13 +13,13 @@ jobs:
 
     services:
       postgres:
-        image: postgres:14
+        image: postgres:15
         ports:
           - "5432:5432"
         env:
           POSTGRES_USER: postgres
           POSTGRES_PASSWORD: postgres
-          POSTGRES_DB: my_app_dev
+          POSTGRES_DB: elder_test
         options: >-
           --health-cmd pg_isready
           --health-interval 10s
