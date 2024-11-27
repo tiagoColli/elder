@@ -48,7 +48,7 @@ dialyzer:
 # Run Credo for code style checks
 .PHONY: credo
 credo:
-	$(MIX) credo
+	$(MIX) credo --strict
 
 # Run Sobelow for security analysis
 .PHONY: sobelow
