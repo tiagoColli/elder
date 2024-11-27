@@ -51,7 +51,7 @@ jobs:
         run: mix compile
 
       - name: Run tests with coverage
+        run: mix coveralls.github
         env:
           MIX_ENV: test
-          COVERALLS_REPO_TOKEN: ${{ secrets.COVERALLS_REPO_TOKEN }}
-        run: mix coveralls.github
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
