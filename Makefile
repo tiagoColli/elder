@@ -2,9 +2,14 @@
 MIX = docker-compose run --rm elder mix
 DB_CONTAINER = postgres_db
 
-# Default target
+# Run dev environment
 .PHONY: run
 run: deps db.create start
+
+# Run all tests
+.PHONY: test
+test:
+	MIX_ENV=test $(MIX) test
 
 # Update project dependencies
 .PHONY: deps

@@ -55,6 +55,3 @@ jobs:
           MIX_ENV: test
           COVERALLS_REPO_TOKEN: ${{ secrets.COVERALLS_REPO_TOKEN }}
         run: mix coveralls.github
-
-      - name: Coveralls GitHub Action
-        uses: coverallsapp/github-action@v2.3.4
