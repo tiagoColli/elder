@@ -1,0 +1,31 @@
+services:
+  elder:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: elder_app
+    command: mix phx.server
+    ports:
+      - "4000:4000"
+    depends_on:
+      - db
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: "ecto://$POSTGRES_USER:$POSTGRES_PASSWORD@db/$POSTGRES_DB"
+    volumes:
+      - .:/app
+    working_dir: /app
+
+  db:
+    image: postgres:15
+    container_name: postgres_db
+    ports:
+      - "5432:5432"
+    env_file:
+      - .env
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+volumes:
+  postgres_data:
