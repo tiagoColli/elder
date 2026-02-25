@@ -37,6 +37,9 @@ ${YELLOW}App:${NC}
 ${YELLOW}Database:${NC}
   ${BLUE}db${NC}                    connect to the dev database
   ${BLUE}db test${NC}               connect to the test database
+  ${BLUE}db.setup${NC}              create and migrate the dev database
+  ${BLUE}db.migrate${NC}            run pending migrations
+  ${BLUE}db.reset${NC}              drop, create, and migrate the dev database
 
 ${YELLOW}Quality:${NC}
   ${BLUE}check${NC}                 run format + compile + credo + dialyzer
@@ -111,6 +114,24 @@ cmd_db() {
   PGPASSWORD="$PROJECT" psql -h localhost -U "$PROJECT" -p 5432 -d "$db_name"
 }
 
+cmd_db_setup() {
+  echo -e "${YELLOW}Setting up database...${NC}"
+  docker exec "$APP_CONTAINER" mix ecto.setup
+  step_ok "Database set up"
+}
+
+cmd_db_migrate() {
+  echo -e "${YELLOW}Running migrations...${NC}"
+  docker exec "$APP_CONTAINER" mix ecto.migrate
+  step_ok "Migrations complete"
+}
+
+cmd_db_reset() {
+  echo -e "${YELLOW}Resetting database...${NC}"
+  docker exec "$APP_CONTAINER" mix ecto.reset
+  step_ok "Database reset"
+}
+
 cmd_check() {
   echo -e "${YELLOW}Running format...${NC}"
   docker exec "$APP_CONTAINER" mix format --check-formatted || step_fail "mix format failed"
@@ -163,6 +184,9 @@ ${YELLOW}Select action:${NC}
   ${YELLOW}Database${NC}
   d) connect to dev database
   t) connect to test database
+  s) setup database (create + migrate)
+  m) run pending migrations
+  r) reset database (drop + create + migrate)
 
   ${YELLOW}Quality${NC}
   c) run all checks (format+compile+credo+dialyzer)
@@ -188,6 +212,9 @@ ${YELLOW}Select action:${NC}
     9) cmd_iex ;;
     d) cmd_db ;;
     t) cmd_db test ;;
+    s) cmd_db_setup ;;
+    m) cmd_db_migrate ;;
+    r) cmd_db_reset ;;
     c) cmd_check ;;
     x) cmd_test ;;
     h) cli_help ;;
@@ -209,6 +236,9 @@ case "$1" in
   iex)        cmd_iex ;;
   run)        shift; cmd_run "$@" ;;
   db)         cmd_db "$2" ;;
+  db.setup)   cmd_db_setup ;;
+  db.migrate) cmd_db_migrate ;;
+  db.reset)   cmd_db_reset ;;
   check)      cmd_check ;;
   test)       shift; cmd_test "$@" ;;
   *)          cmd_start ;;

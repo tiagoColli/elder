@@ -8,3 +8,4 @@ docs/
 *.ez
 erl_crash.dump
 tmp/
+.env

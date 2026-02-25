@@ -5,26 +5,30 @@ services:
       dockerfile: Dockerfile
     container_name: elder_app
     volumes:
-      - ./lib:/app/lib
-      - ./test:/app/test
-      - ./config:/app/config
-      - ./mix.exs:/app/mix.exs
-      - ./.formatter.exs:/app/.formatter.exs
+      - .:/app
+    env_file:
+      - .env
     environment:
       - MIX_ENV=dev
-    command: iex -S mix
+    ports:
+      - "${PHX_PORT:-4000}:${PHX_PORT:-4000}"
+    depends_on:
+      - db
+    command: sh -c "mix deps.get && mix phx.server"
     stdin_open: true
     tty: true
 
   db:
     image: postgres:16-alpine
     container_name: elder_db
+    env_file:
+      - .env
     environment:
-      POSTGRES_USER: elder
-      POSTGRES_PASSWORD: elder
-      POSTGRES_DB: elder_dev
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      POSTGRES_DB: ${DB_NAME}
     ports:
-      - "5432:5432"
+      - "${DB_PORT:-5432}:5432"
     volumes:
       - elder_db_data:/var/lib/postgresql/data
 
