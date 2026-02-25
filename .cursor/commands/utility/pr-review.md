@@ -4,7 +4,7 @@ description: "Review a PR branch like GitHub (human-friendly) -> write docs/revi
 
 IN:
   PR_BRANCH=<optional branch>;
-  BASE_BRANCH=main(default);
+  BASE_BRANCH=dev(default);
   TARGETS=<optional file list|glob>;
   CTX=<optional docs/features/<slug>.md|paste|empty>;
   CHECKOUT=ask|skip(default ask);
@@ -136,5 +136,5 @@ REPORT TEMPLATE (tight; GH-style):
 - ...
 
 EX:
-  /review-pr PR_BRANCH="feature/pipeline-batch" BASE_BRANCH=main CHECKOUT=ask
-  /review-pr BASE_BRANCH=main TARGETS="lib/elder/pipeline/**.ex test/elder/pipeline/**.exs"
+  /review-pr PR_BRANCH="feature/pipeline-batch" BASE_BRANCH=dev CHECKOUT=ask
+  /review-pr BASE_BRANCH=dev TARGETS="lib/elder/pipeline/**.ex test/elder/pipeline/**.exs"

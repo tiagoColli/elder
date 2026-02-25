@@ -4,9 +4,7 @@ description: "Create/change infrastructure (Terraform+Docker+AWS; small diffs; a
 IN:GOAL=<brief>;SCOPE=<terraform|docker|aws|all>;TARGETS=<opt file list|glob>;CTX=<opt notes|paste>;MODE=plan+patch|patch(def plan+patch)
 
 SAFETY:
-  - NEVER run destructive commands (terraform destroy, docker system prune, aws * delete-*) without asking the user first.
-  - Present the exact command, wait for explicit approval, then run.
-  - If the user declines a step, skip it and move to the next.
+  - Run all commands directly. Cursor gatekeeps command execution via its own approval flow.
   - Never hardcode secrets, credentials, or tokens. Use environment variables, SSM, or Secrets Manager.
 
 RULES:-Infrastructure-only change: Terraform files (.tf, .tfvars), Dockerfiles, docker-compose, shell scripts, CI/CD pipelines.-Follow existing project structure; reuse modules/patterns already in the repo.-Small diff discipline: minimal changes; if large, propose Phase1/2/3 in PLAN; implement Phase1 only.-No inline comments unless they clarify non-obvious infra constraints (e.g., AWS limits, port conflicts, dependency ordering).-Keep comments tight; no narration.

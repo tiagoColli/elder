@@ -3,16 +3,15 @@ description: "Stage, commit, push & generate a GitHub PR description (compact; w
 ---
 
 IN:
-  BASE=<branch>(default main);
+  BASE=<branch>(default dev);
   COMMITS=<N>(default 20);
   CONTEXT=<optional notes, tests run, rollout notes>;
   FLOW=<full|pr-only>(default full);
   PLAN=<optional path to docs/reviews/pr-split-*.md>;
 
 SAFETY:
-  - NEVER run any shell command without asking the user first.
-  - Present the exact command, wait for explicit approval, then run.
-  - If the user declines a step, skip it and move to the next.
+  - Run all commands directly. Cursor gatekeeps command execution via its own approval flow.
+  - Never hardcode secrets or tokens.
 
 PLAN INPUT (when PLAN is provided):
   - Read the split plan file and find the PR section matching the current branch or CONTEXT.
@@ -22,16 +21,15 @@ PLAN INPUT (when PLAN is provided):
 
 GIT FLOW (runs when FLOW=full, before PR description generation):
   Step 1 — Status:
-    - Ask to run: git status
+    - Run: git status
     - Show output to user.
 
   Step 2 — Stage:
     - From the status output, present the list of changed/untracked files.
     - Exclude workflow-generated files from staging: docs/prs/*, docs/reviews/*, docs/features/*.
       If the user explicitly asks to include them, allow it.
-    - Ask the user which files to stage (all, specific files, or skip).
-    - Build the git add command accordingly and ask to run it.
-    - After staging, ask to run: git status (to confirm staged files).
+    - Stage files accordingly via git add.
+    - Run: git status (to confirm staged files).
 
   Step 3 — Commit:
     - Analyze the staged changes (diff --cached) to understand what changed.
@@ -39,13 +37,17 @@ GIT FLOW (runs when FLOW=full, before PR description generation):
         <type>: <concise summary>
       Types: feat, fix, refactor, test, docs, chore, perf
     - If the staged changes cover multiple concerns, propose splitting into
-      multiple commits and ask the user. Repeat Step 2+3 for each commit.
-    - Ask to run the git commit command with the agreed message.
+      multiple commits. Repeat Step 2+3 for each commit.
+    - Run the git commit command with the proposed message.
 
   Step 4 — Push:
     - Detect current branch: git rev-parse --abbrev-ref HEAD
     - Check if remote tracking exists: git status -sb
-    - Ask to run: git push -u origin <branch> (or git push if tracking exists).
+    - Run: git push -u origin <branch> (or git push if tracking exists).
+
+  Step 5 — PR:
+    - Create PR via: gh pr create --base BASE --assignee @me
+    - Always assign to current user via --assignee @me.
 
   After GIT FLOW completes (or if FLOW=pr-only), proceed to PR DESCRIPTION.
 
@@ -69,8 +71,8 @@ RULES:
       max 1 snippet, <= 10 lines.
   - Do not run tests or quality gates automatically. Only report what was already run and provided (via CONTEXT or observable evidence).
 
-TERMINAL MODE (only if terminal access is allowed):
-  - Ask to run (single batch, all read-only):
+TERMINAL MODE:
+  - Run directly:
       git fetch --all --prune && git diff --name-status BASE..HEAD && git log --no-merges --pretty=format:%s BASE..HEAD | tail -n COMMITS
     - If BASE not found locally, try origin/BASE..HEAD as fallback
   - After batch, read diff internally (do not quote in PR text):
@@ -157,7 +159,7 @@ LEARNINGS (self-improvement cycle):
   - Keep each bullet to 1 line. No refactors to the command itself.
 
 EX:
-  /pr BASE=main COMMITS=15 CONTEXT="Goal: batch processing; Notes: adds uniqueness to job enqueue; Ran: mix test test/elder/pipeline_test.exs"
-  /pr BASE=main FLOW=full CONTEXT="Goal: batch processing"
-  /pr BASE=main FLOW=pr-only COMMITS=10
-  /pr BASE=main PLAN="docs/reviews/pr-split-pipeline-refactor-20260224.md"
+  /pr BASE=dev COMMITS=15 CONTEXT="Goal: batch processing; Notes: adds uniqueness to job enqueue; Ran: mix test test/elder/pipeline_test.exs"
+  /pr BASE=dev FLOW=full CONTEXT="Goal: batch processing"
+  /pr BASE=dev FLOW=pr-only COMMITS=10
+  /pr BASE=dev PLAN="docs/reviews/pr-split-pipeline-refactor-20260224.md"
