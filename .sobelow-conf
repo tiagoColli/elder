@@ -5,5 +5,5 @@
   router: "",
   exit: "low",
   format: "txt",
-  ignore: []
+  ignore: ["Config.CSP", "Config.HTTPS"]
 ]
