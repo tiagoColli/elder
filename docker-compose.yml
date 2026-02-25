@@ -1,0 +1,32 @@
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: elder_app
+    volumes:
+      - ./lib:/app/lib
+      - ./test:/app/test
+      - ./config:/app/config
+      - ./mix.exs:/app/mix.exs
+      - ./.formatter.exs:/app/.formatter.exs
+    environment:
+      - MIX_ENV=dev
+    command: iex -S mix
+    stdin_open: true
+    tty: true
+
+  db:
+    image: postgres:16-alpine
+    container_name: elder_db
+    environment:
+      POSTGRES_USER: elder
+      POSTGRES_PASSWORD: elder
+      POSTGRES_DB: elder_dev
+    ports:
+      - "5432:5432"
+    volumes:
+      - elder_db_data:/var/lib/postgresql/data
+
+volumes:
+  elder_db_data:

@@ -3,14 +3,13 @@ description: "Analyze local changes and propose how to split them into independe
 ---
 
 IN:
-  BASE=<branch>(default main);
+  BASE=<branch>(default dev);
   FEATURE=<optional name>;
   CTX=<optional notes about intent, what goes together>;
 
 SAFETY:
-  - NEVER run any shell command without asking the user first.
-  - Present the exact command, wait for explicit approval, then run.
-  - If the user declines a step, skip it and move to the next.
+  - Run all commands directly. Cursor gatekeeps command execution via its own approval flow.
+  - Never hardcode secrets or tokens.
 
 RULES:
   - Read-only analysis. Do not change any source code.
@@ -20,7 +19,7 @@ RULES:
   - If information is missing, write "Unknown" and move on.
 
 GATHER (terminal mode):
-  - Ask to run (single batch, all read-only):
+  - Run directly:
       git status && git diff --name-status BASE...HEAD && git diff --name-only --cached && git log --no-merges --oneline BASE...HEAD
     - Fallback if BASE not found locally: replace BASE with origin/BASE
     - If BASE not reachable at all, ask user to provide file list manually.
@@ -105,5 +104,5 @@ LEARNINGS (self-improvement cycle):
   - Keep each bullet to 1 line. No refactors to the command itself.
 
 EX:
-  /pr-split BASE=main FEATURE="Pipeline refactor"
-  /pr-split BASE=main CTX="Goal: separate transform logic from IO adapters"
+  /pr-split BASE=dev FEATURE="Pipeline refactor"
+  /pr-split BASE=dev CTX="Goal: separate transform logic from IO adapters"

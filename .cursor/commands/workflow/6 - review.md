@@ -6,7 +6,7 @@ IN:
   FEATURE=<optional name>;
   TARGETS=<optional file list|glob>;
   CTX=<optional docs/features/<slug>.md|paste|empty>;
-  BASE_BRANCH=main(default);
+  BASE_BRANCH=dev(default);
 
 RULES:
   - Review only:
@@ -124,5 +124,5 @@ LEARNINGS (self-improvement cycle):
   - Keep each bullet to 1 line. No refactors to the command itself.
 
 EX:
-  /review FEATURE="Pipeline" TARGETS="lib/elder/pipeline/**.ex test/elder/pipeline/**.exs" CTX="docs/features/pipeline.md" BASE_BRANCH=main
-  /review FEATURE="Pipeline" CTX="docs/features/pipeline.md" BASE_BRANCH=main
+  /review FEATURE="Pipeline" TARGETS="lib/elder/pipeline/**.ex test/elder/pipeline/**.exs" CTX="docs/features/pipeline.md" BASE_BRANCH=dev
+  /review FEATURE="Pipeline" CTX="docs/features/pipeline.md" BASE_BRANCH=dev
