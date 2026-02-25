@@ -1,5 +1,5 @@
 ---
-description: "Stage, commit, push & generate a GitHub PR description (compact; why+how; from last N non-merge commits + diff) -> docs/prs/<slug>.md"
+description: "Stage, commit, push & create a GitHub PR (compact; why+how; from last N non-merge commits + diff)"
 ---
 
 IN:
@@ -26,7 +26,7 @@ GIT FLOW (runs when FLOW=full, before PR description generation):
 
   Step 2 — Stage:
     - From the status output, present the list of changed/untracked files.
-    - Exclude workflow-generated files from staging: docs/prs/*, docs/reviews/*, docs/features/*.
+    - Exclude workflow-generated files from staging: docs/reviews/*, docs/features/*.
       If the user explicitly asks to include them, allow it.
     - Stage files accordingly via git add.
     - Run: git status (to confirm staged files).
@@ -54,10 +54,9 @@ GIT FLOW (runs when FLOW=full, before PR description generation):
 PR DESCRIPTION:
 
 RULES:
-  - Output is a GitHub-ready PR description with clear why + how.
+  - The PR description is passed directly to `gh pr create --body`.
+  - No docs/prs/*.md files are created. The PR body IS the output.
   - No emojis. No imperative tone. No fluff.
-  - Create/update ONLY docs/prs/<slug>.md via unified diff.
-  - Always output PLAN then unified diff. No extra commentary outside contract.
   - Source of truth (in priority order):
     1) git diff BASE..HEAD + last COMMITS non-merge commit subjects in BASE..HEAD
     2) user-provided CONTEXT
@@ -77,13 +76,6 @@ TERMINAL MODE:
     - If BASE not found locally, try origin/BASE..HEAD as fallback
   - After batch, read diff internally (do not quote in PR text):
       git diff BASE..HEAD
-
-NON-TERMINAL MODE (if terminal access is not allowed):
-  - Rely on CONTEXT + currently open diffs only.
-  - If insufficient to produce an accurate PR description, output NEEDS (no diff) requesting:
-      - file list (name-status) for BASE..HEAD
-      - last N non-merge commit subjects for BASE..HEAD
-      - tests that were run (if any)
 
 AREA CLASSIFICATION (by paths):
   - BE:
@@ -113,12 +105,7 @@ RISK FLAGS (evidence-based only):
   - Perf:
       yes only if query shape/loops/batching/concurrency boundaries changed.
 
-SLUG:
-  - pr-<current-branch>-<YYYYMMDD> (kebab)
-  - If branch unknown, use pr-local
-  - If the file for the slug already exists, update it instead of creating a new one
-
-MARKDOWN FORMAT:
+PR BODY FORMAT:
 ## Summary
 - 2–5 bullets: what changed + why (user/ops impact)
 
@@ -143,14 +130,8 @@ MARKDOWN FORMAT:
 - <logs/metrics/traces changes> or "None/Not provided"
 
 OUTPUT:
-  - PLAN (3–10 bullets, max ~900 chars) then unified diff for docs/prs/<slug>.md only.
-
-PLAN FORMAT (tight):
-  - Goal:
-  - Base / commit window:
-  - Evidence sources (diff/commits/context):
-  - Areas touched (BE/DB/Obs/Tests):
-  - Output file:
+  - The PR body is passed directly to `gh pr create --body` using a HEREDOC.
+  - No markdown files are created. No docs/prs/ directory is used.
 
 LEARNINGS (self-improvement cycle):
   - Before running, read and respect ALL bullets below.
