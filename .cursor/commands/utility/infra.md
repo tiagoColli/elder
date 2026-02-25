@@ -4,8 +4,8 @@ description: "Create/change infrastructure (Terraform+Docker+AWS; small diffs; a
 IN:GOAL=<brief>;SCOPE=<terraform|docker|aws|all>;TARGETS=<opt file list|glob>;CTX=<opt notes|paste>;MODE=plan+patch|patch(def plan+patch)
 
 SAFETY:
-  - NEVER run destructive commands (terraform destroy, docker system prune, aws * delete-*) without asking the user first.
-  - Present the exact command, wait for explicit approval, then run.
+  - Read-only commands (terraform plan, docker compose config, aws describe/list, git read commands) can be run directly without asking.
+  - Destructive commands (terraform destroy/apply, docker system prune, aws delete-*) must present the exact command and wait for user approval.
   - If the user declines a step, skip it and move to the next.
   - Never hardcode secrets, credentials, or tokens. Use environment variables, SSM, or Secrets Manager.
 

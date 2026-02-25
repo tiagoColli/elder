@@ -3,15 +3,15 @@ description: "Stage, commit, push & generate a GitHub PR description (compact; w
 ---
 
 IN:
-  BASE=<branch>(default main);
+  BASE=<branch>(default dev);
   COMMITS=<N>(default 20);
   CONTEXT=<optional notes, tests run, rollout notes>;
   FLOW=<full|pr-only>(default full);
   PLAN=<optional path to docs/reviews/pr-split-*.md>;
 
 SAFETY:
-  - NEVER run any shell command without asking the user first.
-  - Present the exact command, wait for explicit approval, then run.
+  - Read-only git commands (status, diff, log, fetch, rev-parse) can be run directly without asking.
+  - Write commands (git add, git commit, git push) must present the exact command and wait for user approval.
   - If the user declines a step, skip it and move to the next.
 
 PLAN INPUT (when PLAN is provided):
@@ -22,7 +22,7 @@ PLAN INPUT (when PLAN is provided):
 
 GIT FLOW (runs when FLOW=full, before PR description generation):
   Step 1 — Status:
-    - Ask to run: git status
+    - Run: git status
     - Show output to user.
 
   Step 2 — Stage:
@@ -31,7 +31,7 @@ GIT FLOW (runs when FLOW=full, before PR description generation):
       If the user explicitly asks to include them, allow it.
     - Ask the user which files to stage (all, specific files, or skip).
     - Build the git add command accordingly and ask to run it.
-    - After staging, ask to run: git status (to confirm staged files).
+    - After staging, run: git status (to confirm staged files).
 
   Step 3 — Commit:
     - Analyze the staged changes (diff --cached) to understand what changed.
@@ -70,7 +70,7 @@ RULES:
   - Do not run tests or quality gates automatically. Only report what was already run and provided (via CONTEXT or observable evidence).
 
 TERMINAL MODE (only if terminal access is allowed):
-  - Ask to run (single batch, all read-only):
+  - Run directly (read-only, no approval needed):
       git fetch --all --prune && git diff --name-status BASE..HEAD && git log --no-merges --pretty=format:%s BASE..HEAD | tail -n COMMITS
     - If BASE not found locally, try origin/BASE..HEAD as fallback
   - After batch, read diff internally (do not quote in PR text):
@@ -157,7 +157,7 @@ LEARNINGS (self-improvement cycle):
   - Keep each bullet to 1 line. No refactors to the command itself.
 
 EX:
-  /pr BASE=main COMMITS=15 CONTEXT="Goal: batch processing; Notes: adds uniqueness to job enqueue; Ran: mix test test/elder/pipeline_test.exs"
-  /pr BASE=main FLOW=full CONTEXT="Goal: batch processing"
-  /pr BASE=main FLOW=pr-only COMMITS=10
-  /pr BASE=main PLAN="docs/reviews/pr-split-pipeline-refactor-20260224.md"
+  /pr BASE=dev COMMITS=15 CONTEXT="Goal: batch processing; Notes: adds uniqueness to job enqueue; Ran: mix test test/elder/pipeline_test.exs"
+  /pr BASE=dev FLOW=full CONTEXT="Goal: batch processing"
+  /pr BASE=dev FLOW=pr-only COMMITS=10
+  /pr BASE=dev PLAN="docs/reviews/pr-split-pipeline-refactor-20260224.md"

@@ -3,13 +3,13 @@ description: "Analyze local changes and propose how to split them into independe
 ---
 
 IN:
-  BASE=<branch>(default main);
+  BASE=<branch>(default dev);
   FEATURE=<optional name>;
   CTX=<optional notes about intent, what goes together>;
 
 SAFETY:
-  - NEVER run any shell command without asking the user first.
-  - Present the exact command, wait for explicit approval, then run.
+  - Read-only commands (git status, diff, log, fetch) can be run directly without asking.
+  - Write/destructive commands must present the exact command and wait for user approval.
   - If the user declines a step, skip it and move to the next.
 
 RULES:
@@ -105,5 +105,5 @@ LEARNINGS (self-improvement cycle):
   - Keep each bullet to 1 line. No refactors to the command itself.
 
 EX:
-  /pr-split BASE=main FEATURE="Pipeline refactor"
-  /pr-split BASE=main CTX="Goal: separate transform logic from IO adapters"
+  /pr-split BASE=dev FEATURE="Pipeline refactor"
+  /pr-split BASE=dev CTX="Goal: separate transform logic from IO adapters"
