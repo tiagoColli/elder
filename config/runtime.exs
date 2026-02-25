@@ -4,6 +4,12 @@ if System.get_env("PHX_SERVER") do
   config :elder, ElderWeb.Endpoint, server: true
 end
 
+if config_env() in [:prod, :dev] do
+  config :ueberauth, Ueberauth.Strategy.Google.OAuth,
+    client_id: System.get_env("GOOGLE_CLIENT_ID") || "",
+    client_secret: System.get_env("GOOGLE_CLIENT_SECRET") || ""
+end
+
 if config_env() == :prod do
   database_url =
     System.get_env("DATABASE_URL") ||
