@@ -14,3 +14,9 @@ Stack: Elixir, Phoenix (if added), PostgreSQL (if added), Ecto, ExUnit, Credo, J
 When coding, respect the functions available for the Elixir version defined in mix.exs.
 
 If you're asked to create or edit a file, use a structure similar to what's already there. Try to reuse functions that exist.
+
+Context folder convention (lib/elder/<context>/):
+  - schemas/  — Ecto schemas (e.g. Elder.<Context>.Schemas.<Schema>)
+  - query.ex  — composable read queries (queryable in/out pattern); Elder.<Context>.Query
+  - write.ex  — write operations (create, update, delete); Elder.<Context>.Write
+  - <context>.ex — thin public facade using defdelegate to Query/Write
