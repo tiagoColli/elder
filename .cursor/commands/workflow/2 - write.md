@@ -42,9 +42,16 @@ FUNCTIONS / MODULES:
   - Functions small and single-purpose; split orchestration into private step functions; keep transforms pure.
   - Name by intent. Reduce nesting/cyclomatic complexity. Avoid boolean params that flip behavior.
 
+CONTEXT STRUCTURE:
+  - Each context follows: <context>.ex (thin facade with defdelegate), <context>/query.ex (reads), <context>/write.ex (writes), <context>/schemas/ (Ecto schemas).
+  - Facade delegates to Query/Write; never put logic in the facade.
+  - Query module: composable fns (queryable in/queryable out); Repo read calls live here.
+  - Write module: create/update/delete; Repo write calls live here.
+  - Schemas: pure Ecto schemas + changesets; no Repo calls.
+
 PERSISTENCE / QUERIES:
   - Avoid Repo calls in loops; batch + preload; avoid N+1.
-  - Compose Ecto queries via helper fns (queryable in/queryable out); keep queries reusable.
+  - Compose Ecto queries via helper fns (queryable in/queryable out) inside <Context>.Query; keep queries reusable.
   - Select only needed fields.
   - Use explicit transactions when multi-write; use Ecto.Multi if repo uses it.
   - Avoid "fetch-all then filter" when DB can do it.
