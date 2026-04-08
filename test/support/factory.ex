@@ -4,4 +4,5 @@ defmodule Elder.Factory do
   use ExMachina.Ecto, repo: Elder.Repo
   use Elder.UserFactory
   use Elder.UeberauthFactory
+  use Elder.SkillRunFactory
 end
