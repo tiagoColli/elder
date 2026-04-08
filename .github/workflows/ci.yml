@@ -221,4 +221,18 @@ jobs:
           path: _build
           key: build-${{ runner.os }}-${{ env.ELIXIR_VERSION }}-${{ env.OTP_VERSION }}-${{ hashFiles('mix.lock') }}-${{ hashFiles('lib/**/*.ex', 'test/**/*.exs') }}
 
-      - run: mix test
+      - name: Set up test database
+        run: |
+          mix ecto.create --quiet
+          mix ecto.migrate --quiet
+
+      - name: Run tests with coverage
+        run: mix coveralls.html
+
+      - name: Upload coverage report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: cover/
+          retention-days: 14
