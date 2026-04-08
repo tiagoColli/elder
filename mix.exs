@@ -29,7 +29,7 @@ defmodule Elder.MixProject do
   end
 
   defp elixirc_paths(:test), do: ["lib", "test/support"]
-  defp elixirc_paths(_), do: ["lib"]
+  defp elixirc_paths(_env), do: ["lib"]
 
   defp deps do
     [
@@ -57,12 +57,14 @@ defmodule Elder.MixProject do
       {:bandit, "~> 1.6"},
       {:ex_machina, "~> 2.8", only: :test},
       {:floki, ">= 0.30.0", only: :test},
+      {:lazy_html, ">= 0.1.0", only: :test},
       {:mox, "~> 1.0", only: :test},
       {:excoveralls, "~> 0.18", only: :test},
       {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
       {:dialyxir, "~> 1.4", only: [:dev, :test], runtime: false},
       {:sobelow, "~> 0.13", only: [:dev, :test], runtime: false},
-      {:req_llm, "~> 1.9"}
+      {:req_llm, "~> 1.9"},
+      {:html_sanitize_ex, "~> 1.4"}
     ]
   end
 

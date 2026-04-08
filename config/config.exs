@@ -36,7 +36,7 @@ config :tailwind,
 
 config :logger, :console,
   format: "$time $metadata[$level] $message\n",
-  metadata: [:request_id, :feature, :step, :entity_id]
+  metadata: [:request_id, :feature, :step, :cid, :count, :ms, :reason]
 
 config :ueberauth, Ueberauth,
   providers: [
