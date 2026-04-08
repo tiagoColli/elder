@@ -229,6 +229,10 @@ jobs:
           mix ecto.migrate --quiet
 
       - name: Run tests with coverage
-        env:
-          COVERALLS_REPO_TOKEN: ${{ secrets.COVERALLS_REPO_TOKEN }}
-        run: mix coveralls.github
+        run: mix coveralls.lcov
+
+      - name: Upload coverage to Coveralls
+        uses: coverallsapp/github-action@v2
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          file: cover/lcov.info
