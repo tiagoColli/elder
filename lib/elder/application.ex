@@ -9,6 +9,7 @@ defmodule Elder.Application do
       Elder.Repo,
       ElderWeb.Telemetry,
       {Phoenix.PubSub, name: Elder.PubSub},
+      {Task.Supervisor, name: Elder.LLM.TaskSupervisor},
       ElderWeb.Endpoint
     ]
 

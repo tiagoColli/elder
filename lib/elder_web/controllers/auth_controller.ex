@@ -29,8 +29,7 @@ defmodule ElderWeb.AuthController do
       {:ok, user} ->
         Logger.info("Auth | callback | user_id:#{user.id} | ok",
           feature: "Auth",
-          step: "callback",
-          entity_id: user.id
+          step: "callback"
         )
 
         conn
@@ -55,8 +54,7 @@ defmodule ElderWeb.AuthController do
 
     Logger.info("Auth | logout | user_id:#{user_id} | ok",
       feature: "Auth",
-      step: "logout",
-      entity_id: user_id
+      step: "logout"
     )
 
     conn

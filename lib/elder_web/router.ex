@@ -38,6 +38,8 @@ defmodule ElderWeb.Router do
 
     live_session :authenticated, on_mount: [ElderWeb.LiveAuth] do
       live "/dashboard", DashboardLive
+      live "/skills", SkillsLive
+      live "/skills/:slug/run", SkillRunLive
     end
   end
 

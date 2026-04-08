@@ -29,8 +29,7 @@ defmodule Elder.Accounts.Write do
       {:ok, user} ->
         Logger.info("Accounts | create_user | user_id:#{user.id} | ok",
           feature: "Accounts",
-          step: "create_user",
-          entity_id: user.id
+          step: "create_user"
         )
 
       {:error, _changeset} ->

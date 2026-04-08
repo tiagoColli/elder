@@ -1,0 +1,22 @@
+defmodule Elder.LLM do
+  @moduledoc """
+  Public facade for the LLM integration.
+
+  Resolves the model, builds context from the skill and user input, and starts an async stream.
+  """
+
+  alias Elder.LLM.Client
+  alias Elder.LLM.ContextBuilder
+
+  @doc """
+  Streams an LLM response for a skill, broadcasting tokens to a PubSub topic.
+
+  Broadcasts `:llm_token`, `:llm_done`, or `:llm_error` messages to `pubsub_topic`.
+  """
+  @spec stream_run(map(), String.t(), String.t()) :: :ok
+  def stream_run(skill, user_input, pubsub_topic) do
+    model = Application.get_env(:elder, Elder.LLM)[:model] || "google:gemini-2.5-flash"
+    context = ContextBuilder.build(skill, user_input)
+    Client.stream(context, model, pubsub_topic)
+  end
+end
