@@ -10,7 +10,14 @@ defmodule Elder.MixProject do
       start_permanent: Mix.env() == :prod,
       aliases: aliases(),
       deps: deps(),
-      dialyzer: [plt_local_path: "priv/plts", plt_core_path: "priv/plts"]
+      dialyzer: [plt_local_path: "priv/plts", plt_core_path: "priv/plts"],
+      test_coverage: [tool: ExCoveralls],
+      preferred_cli_env: [
+        coveralls: :test,
+        "coveralls.detail": :test,
+        "coveralls.html": :test,
+        "coveralls.json": :test
+      ]
     ]
   end
 
@@ -51,6 +58,7 @@ defmodule Elder.MixProject do
       {:ex_machina, "~> 2.8", only: :test},
       {:floki, ">= 0.30.0", only: :test},
       {:mox, "~> 1.0", only: :test},
+      {:excoveralls, "~> 0.18", only: :test},
       {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
       {:dialyxir, "~> 1.4", only: [:dev, :test], runtime: false},
       {:sobelow, "~> 0.13", only: [:dev, :test], runtime: false},

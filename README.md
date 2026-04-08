@@ -1,5 +1,7 @@
 # Elder
 
+[![Coverage Status](https://coveralls.io/repos/github/tiagoColli/elder/badge.svg)](https://coveralls.io/github/tiagoColli/elder)
+
 An Elixir web application built with Phoenix LiveView.
 
 ## Prerequisites
