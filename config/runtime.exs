@@ -10,6 +10,8 @@ if config_env() in [:prod, :dev] do
     client_secret: System.get_env("GOOGLE_CLIENT_SECRET") || ""
 end
 
+config :elder, Elder.LLM, model: System.get_env("LLM_MODEL", "google:gemini-2.5-flash")
+
 if config_env() == :prod do
   database_url =
     System.get_env("DATABASE_URL") ||
@@ -39,4 +41,11 @@ if config_env() == :prod do
     url: [host: host, port: 443, scheme: "https"],
     http: [ip: {0, 0, 0, 0, 0, 0, 0, 0}, port: port],
     secret_key_base: secret_key_base
+end
+
+if config_env() != :test do
+  config :elder, Elder.Asana,
+    pat: System.fetch_env!("ASANA_PAT"),
+    default_project_gid: System.get_env("ASANA_DEFAULT_PROJECT_GID"),
+    default_workspace_gid: System.get_env("ASANA_DEFAULT_WORKSPACE_GID")
 end

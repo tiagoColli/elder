@@ -45,4 +45,13 @@ config :ueberauth, Ueberauth,
 
 config :phoenix, :json_library, Jason
 
+config :elder, Elder.LLM, model: "google:gemini-2.5-flash"
+
+config :elder, Elder.Asana,
+  pat: nil,
+  default_project_gid: nil,
+  default_workspace_gid: nil
+
+config :elder, :asana_client, Elder.Asana.Client
+
 import_config "#{config_env()}.exs"
