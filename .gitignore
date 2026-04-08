@@ -36,3 +36,8 @@ elder-*.tar
 
 # local folder of development docs
 /local/
+
+# Phoenix build artifacts
+/priv/static/cache_manifest.json
+/priv/static/*.gz
+/priv/static/robots-*.txt
