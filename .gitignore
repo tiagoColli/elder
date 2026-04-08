@@ -33,3 +33,6 @@ elder-*.tar
 
 # Environment variables (secrets).
 .env
+
+# local folder of development docs
+/local/
