@@ -42,7 +42,7 @@ ${YELLOW}Database:${NC}
   ${BLUE}db.reset${NC}              drop, create, and migrate the dev database
 
 ${YELLOW}Quality:${NC}
-  ${BLUE}check${NC}                 run format + compile + credo + dialyzer
+  ${BLUE}check${NC}                 run format + compile + credo + dialyzer + sobelow
   ${BLUE}test${NC}                  run all tests
   ${BLUE}test <path>${NC}           run tests for a specific file/path
 
@@ -153,6 +153,11 @@ cmd_check() {
   step_ok "dialyzer passed"
   echo ""
 
+  echo -e "${YELLOW}Running sobelow...${NC}"
+  docker exec "$APP_CONTAINER" mix sobelow --config || step_fail "sobelow failed"
+  step_ok "sobelow passed"
+  echo ""
+
   step_ok "All checks passed!"
 }
 
@@ -189,7 +194,7 @@ ${YELLOW}Select action:${NC}
   r) reset database (drop + create + migrate)
 
   ${YELLOW}Quality${NC}
-  c) run all checks (format+compile+credo+dialyzer)
+  c) run all checks (format+compile+credo+dialyzer+sobelow)
   x) run all tests
 
   ${YELLOW}Other${NC}

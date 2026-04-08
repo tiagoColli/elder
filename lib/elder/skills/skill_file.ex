@@ -79,6 +79,7 @@ defmodule Elder.Skills.SkillFile do
     |> Enum.map(&read!/1)
   end
 
+  # sobelow_skip ["Traversal.FileModule"]
   defp load!(slug) do
     {path, dir} = resolve_path(slug)
 
@@ -101,8 +102,8 @@ defmodule Elder.Skills.SkillFile do
   end
 
   defp resolve_path(slug) do
-    dir_path = Path.join([@skills_dir, slug, "skill.md"])
-    flat_path = Path.join(@skills_dir, "#{slug}.md")
+    dir_path = safe_path!(Path.join([@skills_dir, slug, "skill.md"]))
+    flat_path = safe_path!(Path.join(@skills_dir, "#{slug}.md"))
 
     cond do
       File.exists?(dir_path) -> {dir_path, Path.join(@skills_dir, slug)}
@@ -111,8 +112,9 @@ defmodule Elder.Skills.SkillFile do
     end
   end
 
+  # sobelow_skip ["Traversal.FileModule"]
   defp resolve_template(body, slug) do
-    template_path = Path.join([@skills_dir, slug, "template.html"])
+    template_path = safe_path!(Path.join([@skills_dir, slug, "template.html"]))
 
     if String.contains?(body, "{{template}}") and File.exists?(template_path) do
       template = File.read!(template_path)
@@ -120,6 +122,16 @@ defmodule Elder.Skills.SkillFile do
     else
       body
     end
+  end
+
+  defp safe_path!(path) do
+    expanded = Path.expand(path)
+
+    unless String.starts_with?(expanded, Path.expand(@skills_dir) <> "/") do
+      raise "Path traversal blocked: #{path}"
+    end
+
+    expanded
   end
 
   @known_frontmatter_keys %{
