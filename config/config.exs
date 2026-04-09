@@ -45,9 +45,9 @@ config :ueberauth, Ueberauth,
 
 config :phoenix, :json_library, Jason
 
-config :elder, Elder.LLM,
-  model: "google:gemini-2.5-flash",
-  skip_interview_call: false
+config :elder, Elder.LLM, model: "google:gemini-2.5-flash"
+
+config :elder, :llm_client, Elder.LLM.Client
 
 config :elder, Elder.Asana,
   pat: nil,
