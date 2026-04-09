@@ -1,7 +1,11 @@
 defmodule Elder.LLM.Client do
   @moduledoc """
   Streams LLM responses asynchronously, broadcasting tokens via PubSub.
+
+  Implements `Elder.LLM.ClientBehaviour` using ReqLLM.
   """
+
+  @behaviour Elder.LLM.ClientBehaviour
 
   alias Phoenix.PubSub
 

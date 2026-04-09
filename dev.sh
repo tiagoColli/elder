@@ -93,8 +93,9 @@ cmd_ps() {
   docker compose ps
 }
 
+# `sh` not `/bin/sh`: Git Bash path-converts `/...` for docker.exe on Windows.
 cmd_shell() {
-  docker exec -it "$APP_CONTAINER" /bin/sh
+  docker exec -it "$APP_CONTAINER" sh
 }
 
 cmd_iex() {
@@ -163,9 +164,9 @@ cmd_check() {
 
 cmd_test() {
   if [ -z "$1" ]; then
-    docker exec "$APP_CONTAINER" mix test
+    docker exec -e MIX_ENV=test "$APP_CONTAINER" mix test
   else
-    docker exec "$APP_CONTAINER" mix test "$@"
+    docker exec -e MIX_ENV=test "$APP_CONTAINER" mix test "$@"
   fi
 }
 

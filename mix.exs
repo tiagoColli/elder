@@ -22,9 +22,12 @@ defmodule Elder.MixProject do
   end
 
   def application do
+    extra_applications =
+      [:logger, :runtime_tools] ++ if(Mix.env() == :test, do: [:mox], else: [])
+
     [
       mod: {Elder.Application, []},
-      extra_applications: [:logger, :runtime_tools]
+      extra_applications: extra_applications
     ]
   end
 
