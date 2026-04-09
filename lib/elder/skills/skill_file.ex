@@ -87,7 +87,7 @@ defmodule Elder.Skills.SkillFile do
 
     content =
       case File.read(path) do
-        {:ok, c} -> c
+        {:ok, c} -> String.replace(c, "\r\n", "\n")
         {:error, _reason} -> raise "Skill file not found: #{path}"
       end
 

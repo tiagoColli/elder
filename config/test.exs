@@ -26,3 +26,5 @@ config :phoenix_live_view,
   enable_expensive_runtime_checks: true
 
 config :elder, :asana_client, Elder.Asana.ClientMock
+
+config :elder, :llm_client, Elder.LLM.ClientMock
