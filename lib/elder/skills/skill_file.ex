@@ -24,7 +24,8 @@ defmodule Elder.Skills.SkillFile do
           name: String.t(),
           description: String.t(),
           version: String.t(),
-          system_prompt: String.t()
+          system_prompt: String.t(),
+          review_slug: String.t() | nil
         }
 
   @doc "Loads and resolves a skill by slug, including dependencies and template substitution. Raises if not found."
@@ -53,7 +54,8 @@ defmodule Elder.Skills.SkillFile do
       name: metadata.name,
       description: Map.get(metadata, :description, ""),
       version: Map.get(metadata, :version, "1"),
-      system_prompt: system_prompt
+      system_prompt: system_prompt,
+      review_slug: Map.get(metadata, :review_slug, nil)
     }
   end
 
@@ -139,7 +141,8 @@ defmodule Elder.Skills.SkillFile do
     "name" => :name,
     "description" => :description,
     "version" => :version,
-    "includes" => :includes
+    "includes" => :includes,
+    "review" => :review_slug
   }
 
   defp parse_frontmatter(raw) do
