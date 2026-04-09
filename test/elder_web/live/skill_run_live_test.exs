@@ -1,8 +1,17 @@
 defmodule ElderWeb.SkillRunLiveTest do
   use ElderWeb.ConnCase, async: false
 
+  import Mox
   import Phoenix.LiveViewTest
   import Elder.Factory
+
+  setup :set_mox_global
+
+  setup do
+    stub(Elder.LLM.ClientMock, :stream, fn _context, _model, _topic -> :ok end)
+    stub(Elder.LLM.ClientMock, :call, fn _context, _model, _topic -> :ok end)
+    :ok
+  end
 
   defp authed_conn(conn, user) do
     conn

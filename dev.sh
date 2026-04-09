@@ -164,9 +164,9 @@ cmd_check() {
 
 cmd_test() {
   if [ -z "$1" ]; then
-    docker exec "$APP_CONTAINER" mix test
+    docker exec -e MIX_ENV=test "$APP_CONTAINER" mix test
   else
-    docker exec "$APP_CONTAINER" mix test "$@"
+    docker exec -e MIX_ENV=test "$APP_CONTAINER" mix test "$@"
   fi
 }
 
