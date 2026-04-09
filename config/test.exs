@@ -26,3 +26,6 @@ config :phoenix_live_view,
   enable_expensive_runtime_checks: true
 
 config :elder, :asana_client, Elder.Asana.ClientMock
+
+# Avoid real ReqLLM interview tasks in LiveView tests (drive flow via send/2).
+config :elder, Elder.LLM, skip_interview_call: true

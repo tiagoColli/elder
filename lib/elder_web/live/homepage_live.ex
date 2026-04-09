@@ -26,12 +26,10 @@ defmodule ElderWeb.HomepageLive do
   def render(assigns) do
     ~H"""
     <div class="flex min-h-[80vh] flex-col items-center justify-center">
-      <h1 class="text-5xl font-bold tracking-tight text-zinc-900">
-        Elder
-      </h1>
-      <p class="mt-4 text-lg text-zinc-600">
-        Building something great.
-      </p>
+      <h1 class="text-5xl font-bold tracking-tight text-zinc-900">Elder</h1>
+      
+      <p class="mt-4 text-lg text-zinc-600">Building something great.</p>
+      
       <a
         href="/auth/google"
         class="mt-8 inline-flex items-center gap-3 rounded-lg bg-zinc-900 px-6 py-3 text-sm font-semibold text-white shadow-sm hover:bg-zinc-700 transition-colors"
