@@ -12,11 +12,23 @@ module.exports = {
     extend: {
       colors: {
         brand: "#FD4F00",
+        page: "rgb(var(--color-page) / <alpha-value>)",
+        surface: "rgb(var(--color-surface) / <alpha-value>)",
+        "surface-raised": "rgb(var(--color-surface-raised) / <alpha-value>)",
+        field: "rgb(var(--color-field) / <alpha-value>)",
+        primary: "rgb(var(--color-primary) / <alpha-value>)",
+        secondary: "rgb(var(--color-secondary) / <alpha-value>)",
+        muted: "rgb(var(--color-muted) / <alpha-value>)",
+        "base-border": "rgb(var(--color-base-border) / <alpha-value>)",
+        "raised-border": "rgb(var(--color-raised-border) / <alpha-value>)",
+        accent: "rgb(var(--color-accent) / <alpha-value>)",
+        "accent-text": "rgb(var(--color-accent-text) / <alpha-value>)",
       },
     },
   },
   plugins: [
     require("@tailwindcss/forms"),
+    require("@tailwindcss/typography"),
     plugin(({addVariant}) => addVariant("phx-click-loading", [".phx-click-loading&", ".phx-click-loading &"])),
     plugin(({addVariant}) => addVariant("phx-submit-loading", [".phx-submit-loading&", ".phx-submit-loading &"])),
     plugin(({addVariant}) => addVariant("phx-change-loading", [".phx-change-loading&", ".phx-change-loading &"])),

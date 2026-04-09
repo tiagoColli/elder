@@ -1,3 +1,42 @@
 @import "tailwindcss/base";
 @import "tailwindcss/components";
 @import "tailwindcss/utilities";
+
+:root {
+  --color-page: 9 9 11;
+  --color-surface: 24 24 27;
+  --color-surface-raised: 39 39 42;
+  --color-field: 63 63 70;
+  --color-primary: 228 228 231;
+  --color-secondary: 161 161 170;
+  --color-muted: 113 113 122;
+  --color-base-border: 63 63 70;
+  --color-raised-border: 82 82 91;
+  --color-accent: 99 102 241;
+  --color-accent-text: 129 140 248;
+}
+
+[type='text'],
+[type='email'],
+[type='url'],
+[type='password'],
+[type='number'],
+[type='date'],
+[type='datetime-local'],
+[type='month'],
+[type='search'],
+[type='tel'],
+[type='time'],
+[type='week'],
+textarea,
+select {
+  background-color: rgb(var(--color-field));
+  border-color: rgb(var(--color-base-border));
+  color: rgb(var(--color-primary));
+}
+
+[type='text']::placeholder,
+[type='email']::placeholder,
+textarea::placeholder {
+  color: rgb(var(--color-muted));
+}
