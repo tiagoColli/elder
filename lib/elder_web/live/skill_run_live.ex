@@ -104,10 +104,7 @@ defmodule ElderWeb.SkillRunLive do
   end
 
   def handle_event("chat_reply", %{"message" => message}, socket) do
-    topic = "skill_run:#{socket.id}"
-    conversation = socket.assigns.conversation ++ [%{role: :user, text: message}]
-    :ok = LLM.interview_run(socket.assigns.review_skill, conversation, topic)
-    {:noreply, assign(socket, conversation: conversation, chat_loading: true, error: nil)}
+    {:noreply, interview_user_message(socket, message)}
   end
 
   def handle_event("pick_suggestion", _params, %{assigns: %{chat_loading: true}} = socket) do
@@ -119,10 +116,7 @@ defmodule ElderWeb.SkillRunLive do
   end
 
   def handle_event("pick_suggestion", %{"message" => message}, socket) do
-    topic = "skill_run:#{socket.id}"
-    conversation = socket.assigns.conversation ++ [%{role: :user, text: message}]
-    :ok = LLM.interview_run(socket.assigns.review_skill, conversation, topic)
-    {:noreply, assign(socket, conversation: conversation, chat_loading: true, error: nil)}
+    {:noreply, interview_user_message(socket, message)}
   end
 
   def handle_event("pick_suggestion", _params, socket) do
@@ -318,11 +312,11 @@ defmodule ElderWeb.SkillRunLive do
           suggestions: p.suggestions
         }
 
-        conversation = socket.assigns.conversation ++ [msg]
+        conversation = append_conversation_message(socket.assigns.conversation, msg)
 
         {:noreply, assign(socket, conversation: conversation, chat_loading: false, error: nil)}
 
-      {:error, _} ->
+      {:error, _parse_error} ->
         if String.trim(text) == "[READY]" do
           {:noreply, interview_finish_to_streaming(socket)}
         else
@@ -388,8 +382,22 @@ defmodule ElderWeb.SkillRunLive do
     "Generation failed: #{reason}"
   end
 
-  defp format_llm_error(_reason) do
+  defp format_llm_error(_unknown_reason) do
     "Generation failed. Please try again."
+  end
+
+  defp interview_user_message(socket, text) do
+    topic = "skill_run:#{socket.id}"
+
+    conversation =
+      append_conversation_message(socket.assigns.conversation, %{role: :user, text: text})
+
+    :ok = LLM.interview_run(socket.assigns.review_skill, conversation, topic)
+    assign(socket, conversation: conversation, chat_loading: true, error: nil)
+  end
+
+  defp append_conversation_message(conversation, message) do
+    Enum.reverse([message | Enum.reverse(conversation)])
   end
 
   defp sanitize_llm_output(html) do
@@ -430,7 +438,7 @@ defmodule ElderWeb.SkillRunLive do
         base =
           case Map.get(msg, :question) do
             q when is_binary(q) and q != "" -> base <> "\nQuestion: #{q}"
-            _ -> base
+            _no_question -> base
           end
 
         case msg do
@@ -440,7 +448,7 @@ defmodule ElderWeb.SkillRunLive do
               line -> base <> "\n" <> line
             end
 
-          _ ->
+          _no_draft ->
             base
         end
     end)
@@ -454,21 +462,21 @@ defmodule ElderWeb.SkillRunLive do
         {:description, d.description},
         {:due_date, d.due_date}
       ]
-      |> Enum.filter(fn {_, v} -> present_draft_value?(v) end)
+      |> Enum.filter(fn {_key, v} -> present_draft_value?(v) end)
       |> Enum.map(fn {k, v} -> "#{k}: #{v}" end)
 
     case parts do
       [] -> nil
-      _ -> "Draft — " <> Enum.join(parts, " | ")
+      _non_empty -> "Draft — " <> Enum.join(parts, " | ")
     end
   end
 
   defp present_draft_value?(v) when v in [nil, ""], do: false
-  defp present_draft_value?(_), do: true
+  defp present_draft_value?(_present), do: true
 
   defp format_draft_cell(value) when value in [nil, ""], do: "—"
   defp format_draft_cell(value) when is_binary(value), do: value
-  defp format_draft_cell(_), do: "—"
+  defp format_draft_cell(_other), do: "—"
 
   @impl Phoenix.LiveView
   def render(assigns) do

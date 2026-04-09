@@ -52,26 +52,26 @@ defmodule Elder.LLM.InterviewResponse do
     trimmed = String.trim(text)
 
     case Regex.run(~r/```json\s*([\s\S]*?)```/i, trimmed) do
-      [_, inner] -> {:ok, String.trim(inner)}
+      [_fence, inner] -> {:ok, String.trim(inner)}
       nil -> brace_delimited_json(trimmed)
     end
   end
 
   defp brace_delimited_json(s) do
-    with {start, _} <- :binary.match(s, "{"),
+    with {start, _open_len} <- :binary.match(s, "{"),
          chunk <- binary_part(s, start, byte_size(s) - start),
-         {from_end, _} <- :binary.match(String.reverse(chunk), "}"),
+         {from_end, _close_len} <- :binary.match(String.reverse(chunk), "}"),
          len <- byte_size(chunk) - from_end do
       {:ok, binary_part(chunk, 0, len)}
     else
-      _ -> {:error, :invalid_interview_json}
+      _no_braces -> {:error, :invalid_interview_json}
     end
   end
 
   defp decode_json(json_str) do
     case Jason.decode(json_str) do
       {:ok, map} when is_map(map) -> {:ok, map}
-      _ -> {:error, :invalid_interview_json}
+      _invalid_json -> {:error, :invalid_interview_json}
     end
   end
 
@@ -96,11 +96,9 @@ defmodule Elder.LLM.InterviewResponse do
     end
   end
 
-  defp build_struct(_), do: {:error, :invalid_interview_json}
-
   defp parse_status("continue"), do: {:ok, :continue}
   defp parse_status("ready"), do: {:ok, :ready}
-  defp parse_status(_), do: {:error, :invalid_interview_status}
+  defp parse_status(_invalid_status), do: {:error, :invalid_interview_status}
 
   defp parse_draft(draft) when is_map(draft) do
     keys = ["title", "responsible", "description", "due_date"]
@@ -118,23 +116,23 @@ defmodule Elder.LLM.InterviewResponse do
     end
   end
 
-  defp parse_draft(_), do: {:error, :invalid_interview_json}
+  defp parse_draft(_invalid), do: {:error, :invalid_interview_json}
 
   defp require_string(s) when is_binary(s), do: {:ok, s}
-  defp require_string(_), do: {:error, :invalid_interview_json}
+  defp require_string(_not_binary), do: {:error, :invalid_interview_json}
 
   defp optional_string(nil), do: nil
   defp optional_string(s) when is_binary(s), do: s
-  defp optional_string(_), do: nil
+  defp optional_string(_not_string), do: nil
 
   defp parse_suggestions(list) when is_list(list) do
     list
     |> Enum.flat_map(fn
       %{"label" => l, "value" => v} when is_binary(l) and is_binary(v) -> [%{label: l, value: v}]
-      _ -> []
+      _not_suggestion -> []
     end)
     |> Enum.take(@max_suggestions)
   end
 
-  defp parse_suggestions(_), do: []
+  defp parse_suggestions(_not_list), do: []
 end

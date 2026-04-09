@@ -139,7 +139,7 @@ defmodule ElderWeb.SkillRunLiveTest do
       send(view.pid, {:interview_done, {:ok, json}})
 
       html = render(view)
-      assert html =~ "Got it — we'll use that title."
+      assert html =~ "Got it — we&#39;ll use that title."
       assert html =~ "Report task"
       assert html =~ ~s(data-testid="interview-draft")
       assert html =~ ~s(data-testid="interview-question")
@@ -179,7 +179,9 @@ defmodule ElderWeb.SkillRunLiveTest do
       html = render(view)
       assert html =~ "I will own it"
 
-      view |> element("button", "I will own it") |> render_click()
+      view
+      |> element("button", "I will own it")
+      |> render_click()
 
       assert render(view) =~ "Thinking"
     end
