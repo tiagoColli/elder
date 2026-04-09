@@ -19,4 +19,17 @@ defmodule Elder.LLM do
     context = ContextBuilder.build(skill, user_input)
     Client.stream(context, model, pubsub_topic)
   end
+
+  @doc """
+  Runs a synchronous interview LLM call for a review skill, broadcasting `{:interview_done, result}` to the topic.
+
+  `conversation` is a list of `%{role: :user | :assistant, text: String.t()}` maps.
+  Broadcasts `{:interview_done, {:ok, text}}` or `{:interview_done, {:error, reason}}`.
+  """
+  @spec interview_run(map(), [%{role: atom(), text: String.t()}], String.t()) :: :ok
+  def interview_run(review_skill, conversation, pubsub_topic) do
+    model = Application.get_env(:elder, Elder.LLM)[:model] || "google:gemini-2.5-flash"
+    context = ContextBuilder.build_conversation(review_skill, conversation)
+    Client.call(context, model, pubsub_topic)
+  end
 end

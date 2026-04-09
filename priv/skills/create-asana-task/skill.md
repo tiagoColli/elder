@@ -2,6 +2,7 @@
 slug: create-asana-task
 name: Create Asana Task
 description: Converts a plain-language brief into a structured, well-formatted Asana task description ready to paste into Asana.
+review: create-asana-task-review
 includes:
   - standards/asana-output-rules
 version: 1

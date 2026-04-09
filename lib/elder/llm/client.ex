@@ -23,6 +23,22 @@ defmodule Elder.LLM.Client do
     :ok
   end
 
+  @doc "Runs a non-streaming LLM request asynchronously, broadcasting `{:interview_done, result}` to the topic."
+  @spec call(term(), String.t(), String.t()) :: :ok
+  def call(context, model, pubsub_topic) do
+    Task.Supervisor.start_child(Elder.LLM.TaskSupervisor, fn ->
+      result =
+        case ReqLLM.generate_text(model, context) do
+          {:ok, response} -> {:ok, ReqLLM.Response.text(response)}
+          {:error, reason} -> {:error, reason}
+        end
+
+      PubSub.broadcast(Elder.PubSub, pubsub_topic, {:interview_done, result})
+    end)
+
+    :ok
+  end
+
   defp run_stream(context, model, pubsub_topic) do
     case ReqLLM.stream_text(model, context) do
       {:ok, stream_response} ->

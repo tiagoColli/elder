@@ -20,11 +20,18 @@ defmodule ElderWeb.SkillRunLive do
   def mount(%{"slug" => slug}, _session, socket) do
     skill = Skills.get_skill!(slug)
 
+    review_skill =
+      case skill.review_slug do
+        nil -> nil
+        review_slug -> Skills.get_skill!(review_slug)
+      end
+
     socket =
       socket
       |> assign(
         page_title: skill.name,
         skill: skill,
+        review_skill: review_skill,
         skill_run: nil,
         phase: :idle,
         user_input: "",
@@ -33,6 +40,8 @@ defmodule ElderWeb.SkillRunLive do
         asana_task_url: nil,
         error: nil,
         token_count: 0,
+        conversation: [],
+        chat_loading: false,
         workspaces: [],
         projects: [],
         sections: [],
@@ -56,14 +65,47 @@ defmodule ElderWeb.SkillRunLive do
   def handle_event("generate", %{"user_input" => input}, socket) do
     topic = "skill_run:#{socket.id}"
     PubSub.subscribe(Elder.PubSub, topic)
-    :ok = LLM.stream_run(socket.assigns.skill, input, topic)
 
-    socket =
-      socket
-      |> assign(phase: :streaming, user_input: input, error: nil, token_count: 0)
-      |> stream(:tokens, [], reset: true)
+    case socket.assigns.review_skill do
+      nil ->
+        :ok = LLM.stream_run(socket.assigns.skill, input, topic)
 
+        socket =
+          socket
+          |> assign(phase: :streaming, user_input: input, error: nil, token_count: 0)
+          |> stream(:tokens, [], reset: true)
+
+        {:noreply, socket}
+
+      review_skill ->
+        conversation = [%{role: :user, text: input}]
+        :ok = LLM.interview_run(review_skill, conversation, topic)
+
+        socket =
+          assign(socket,
+            phase: :chatting,
+            conversation: conversation,
+            chat_loading: true,
+            error: nil
+          )
+
+        {:noreply, socket}
+    end
+  end
+
+  def handle_event("chat_reply", _params, %{assigns: %{chat_loading: true}} = socket) do
     {:noreply, socket}
+  end
+
+  def handle_event("chat_reply", %{"message" => ""}, socket) do
+    {:noreply, socket}
+  end
+
+  def handle_event("chat_reply", %{"message" => message}, socket) do
+    topic = "skill_run:#{socket.id}"
+    conversation = socket.assigns.conversation ++ [%{role: :user, text: message}]
+    :ok = LLM.interview_run(socket.assigns.review_skill, conversation, topic)
+    {:noreply, assign(socket, conversation: conversation, chat_loading: true)}
   end
 
   def handle_event("select_workspace", %{"workspace_gid" => gid}, socket) do
@@ -158,6 +200,8 @@ defmodule ElderWeb.SkillRunLive do
         asana_task_url: nil,
         error: nil,
         token_count: 0,
+        conversation: [],
+        chat_loading: false,
         workspaces: [],
         projects: [],
         sections: [],
@@ -239,6 +283,28 @@ defmodule ElderWeb.SkillRunLive do
     {:noreply, socket}
   end
 
+  def handle_info({:interview_done, {:ok, text}}, socket) do
+    if String.trim(text) == "[READY]" do
+      topic = "skill_run:#{socket.id}"
+      transcript = build_transcript(socket.assigns.conversation)
+      :ok = LLM.stream_run(socket.assigns.skill, transcript, topic)
+
+      socket =
+        socket
+        |> assign(phase: :streaming, user_input: transcript, error: nil, token_count: 0)
+        |> stream(:tokens, [], reset: true)
+
+      {:noreply, socket}
+    else
+      conversation = socket.assigns.conversation ++ [%{role: :assistant, text: text}]
+      {:noreply, assign(socket, conversation: conversation, chat_loading: false)}
+    end
+  end
+
+  def handle_info({:interview_done, {:error, reason}}, socket) do
+    {:noreply, assign(socket, chat_loading: false, error: format_llm_error(reason))}
+  end
+
   def handle_info({:asana_workspaces_loaded, {:ok, workspaces}}, socket) do
     {:noreply, assign(socket, workspaces: workspaces, asana_loading: false)}
   end
@@ -300,6 +366,13 @@ defmodule ElderWeb.SkillRunLive do
     |> HtmlSanitizeEx.basic_html()
   end
 
+  defp build_transcript(conversation) do
+    Enum.map_join(conversation, "\n\n", fn
+      %{role: :user, text: text} -> "User: #{text}"
+      %{role: :assistant, text: text} -> "Assistant: #{text}"
+    end)
+  end
+
   @impl Phoenix.LiveView
   def render(assigns) do
     ~H"""
@@ -333,6 +406,49 @@ defmodule ElderWeb.SkillRunLive do
               Generate →
             </button>
           </div>
+        </form>
+      </div>
+
+      <div :if={@phase == :chatting}>
+        <div class="space-y-4 mb-6">
+          <div
+            :for={msg <- @conversation}
+            class={["flex", if(msg.role == :user, do: "justify-end", else: "justify-start")]}
+          >
+            <div class={[
+              "max-w-prose rounded-lg px-4 py-2 text-sm",
+              if(msg.role == :user,
+                do: "bg-indigo-600 text-white",
+                else: "bg-zinc-100 text-zinc-800"
+              )
+            ]}>
+              {msg.text}
+            </div>
+          </div>
+
+          <div :if={@chat_loading} class="flex justify-start">
+            <div class="flex items-center gap-2 rounded-lg bg-zinc-100 px-4 py-2 text-sm text-zinc-500">
+              <span class="animate-spin inline-block w-3 h-3 border-2 border-zinc-400 border-t-transparent rounded-full">
+              </span>
+              Thinking...
+            </div>
+          </div>
+        </div>
+
+        <form :if={not @chat_loading} phx-submit="chat_reply" class="flex gap-2">
+          <input
+            type="text"
+            name="message"
+            placeholder="Reply..."
+            autofocus
+            class="block flex-1 rounded-md border-zinc-300 shadow-sm text-sm focus:border-indigo-500 focus:ring-indigo-500"
+          />
+          <button
+            type="submit"
+            class="rounded-md bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-500"
+          >
+            Send →
+          </button>
         </form>
       </div>
 
