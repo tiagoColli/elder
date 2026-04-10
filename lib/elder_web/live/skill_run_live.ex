@@ -50,9 +50,24 @@ defmodule ElderWeb.SkillRunLive do
         selected_workspace_gid: nil,
         selected_project_gid: nil,
         selected_section_gid: nil,
-        asana_loading: false
+        asana_loading: connected?(socket)
       )
       |> stream(:tokens, [])
+
+    if connected?(socket) do
+      lv_pid = self()
+
+      Task.start(fn ->
+        result =
+          try do
+            Asana.list_workspaces()
+          rescue
+            e -> {:error, {:exception, e}}
+          end
+
+        send(lv_pid, {:asana_workspaces_loaded, result})
+      end)
+    end
 
     {:ok, socket}
   rescue
@@ -141,8 +156,8 @@ defmodule ElderWeb.SkillRunLive do
       assign(socket,
         selected_workspace_gid: gid,
         projects: [],
-        sections: [],
         selected_project_gid: nil,
+        sections: [],
         selected_section_gid: nil,
         asana_loading: true
       )
@@ -176,7 +191,8 @@ defmodule ElderWeb.SkillRunLive do
   end
 
   def handle_event("select_section", %{"section_gid" => gid}, socket) do
-    {:noreply, assign(socket, selected_section_gid: gid)}
+    selected = if gid in [nil, ""], do: nil, else: gid
+    {:noreply, assign(socket, selected_section_gid: selected)}
   end
 
   def handle_event("send_to_asana", _params, socket) do
@@ -217,7 +233,6 @@ defmodule ElderWeb.SkillRunLive do
         token_count: 0,
         conversation: [],
         chat_loading: false,
-        workspaces: [],
         projects: [],
         sections: [],
         selected_workspace_gid: nil,
@@ -255,26 +270,12 @@ defmodule ElderWeb.SkillRunLive do
 
     case Skills.save_run(attrs) do
       {:ok, skill_run} ->
-        lv_pid = self()
-
-        Task.start(fn ->
-          result =
-            try do
-              Asana.list_workspaces()
-            rescue
-              e -> {:error, {:exception, e}}
-            end
-
-          send(lv_pid, {:asana_workspaces_loaded, result})
-        end)
-
         socket =
           assign(socket,
             skill_run: skill_run,
             phase: :done,
             llm_output: meta.output,
-            llm_cost: meta.cost_usd,
-            asana_loading: true
+            llm_cost: meta.cost_usd
           )
 
         {:noreply, socket}
@@ -354,8 +355,7 @@ defmodule ElderWeb.SkillRunLive do
   end
 
   def handle_info({:asana_sections_loaded, {:error, _reason}}, socket) do
-    {:noreply,
-     assign(socket, asana_loading: false, sections: [], error: "Could not load Asana sections")}
+    {:noreply, assign(socket, asana_loading: false, error: "Could not load Asana sections")}
   end
 
   def handle_info({:asana_result, {:ok, %{task_url: url}}}, socket) do
@@ -405,7 +405,6 @@ defmodule ElderWeb.SkillRunLive do
     |> String.replace(~r/<body>/i, "")
     |> String.replace(~r/<\/body>/i, "")
     |> String.trim()
-    |> HtmlSanitizeEx.basic_html()
   end
 
   defp interview_finish_to_streaming(socket) do
@@ -483,28 +482,29 @@ defmodule ElderWeb.SkillRunLive do
     ~H"""
     <div class="max-w-3xl mx-auto py-10 px-4">
       <div class="mb-8">
-        <.link navigate={~p"/skills"} class="text-sm text-zinc-500 hover:text-zinc-700">
+        <.link navigate={~p"/skills"} class="text-sm text-muted hover:text-secondary">
           ← Back to Skills
         </.link>
-        <h1 class="mt-2 text-2xl font-bold text-zinc-900">{@skill.name}</h1>
+        <h1 class="mt-2 text-2xl font-bold text-primary">{@skill.name}</h1>
 
-        <p class="mt-1 text-sm text-zinc-500">{@skill.description}</p>
+        <p class="mt-1 text-sm text-secondary">{@skill.description}</p>
       </div>
 
-      <div :if={@error} class="mb-4 rounded-md bg-red-50 p-4 text-sm text-red-700">{@error}</div>
+      <div :if={@error} class="mb-4 rounded-md bg-red-950/50 p-4 text-sm text-red-400">{@error}</div>
 
       <div :if={@phase == :idle}>
         <form phx-submit="generate">
-          <label class="block text-sm font-medium text-zinc-700 mb-1">Your brief</label> <textarea
+          <label class="block text-sm font-medium text-secondary mb-1">Your brief</label>
+          <textarea
             name="user_input"
             rows="5"
             placeholder="Describe what you need..."
-            class="block w-full rounded-md border-zinc-300 shadow-sm text-sm focus:border-indigo-500 focus:ring-indigo-500"
+            class="block w-full rounded-md border-base-border bg-field text-primary placeholder:text-muted text-sm shadow-sm focus:border-accent focus:ring-accent"
           >{@user_input}</textarea>
           <div class="mt-3 flex justify-end">
             <button
               type="submit"
-              class="rounded-md bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-500"
+              class="rounded-md bg-accent px-4 py-2 text-sm font-semibold text-white hover:bg-accent/80"
             >
               Generate →
             </button>
@@ -523,7 +523,7 @@ defmodule ElderWeb.SkillRunLive do
           >
             <div
               :if={msg.role == :user}
-              class="max-w-[85%] sm:max-w-prose rounded-2xl bg-indigo-600 px-4 py-2.5 text-sm text-white shadow-sm leading-relaxed"
+              class="max-w-[85%] sm:max-w-prose rounded-2xl bg-accent px-4 py-2.5 text-sm text-white shadow-sm leading-relaxed"
             >
               {msg.text}
             </div>
@@ -533,7 +533,7 @@ defmodule ElderWeb.SkillRunLive do
                 msg.role == :assistant &&
                   not is_struct(Map.get(msg, :draft), InterviewResponseDraft)
               }
-              class="max-w-[85%] sm:max-w-prose rounded-2xl bg-zinc-100 px-4 py-2.5 text-sm text-zinc-800 shadow-sm leading-relaxed"
+              class="max-w-[85%] sm:max-w-prose rounded-2xl bg-surface-raised px-4 py-2.5 text-sm text-primary shadow-sm leading-relaxed"
             >
               {msg.text}
             </div>
@@ -543,67 +543,67 @@ defmodule ElderWeb.SkillRunLive do
                 msg.role == :assistant &&
                   is_struct(Map.get(msg, :draft), InterviewResponseDraft)
               }
-              class="w-full max-w-xl rounded-xl border border-zinc-200/90 bg-white shadow-sm ring-1 ring-zinc-900/5"
+              class="w-full max-w-xl rounded-xl border border-base-border bg-surface-raised shadow-md"
             >
-              <div class="border-b border-zinc-100 bg-gradient-to-b from-zinc-50 to-white px-4 py-2.5">
-                <p class="text-[11px] font-semibold uppercase tracking-widest text-zinc-400">
+              <div class="border-b border-raised-border bg-surface-raised px-4 py-2.5">
+                <p class="text-[11px] font-semibold uppercase tracking-widest text-muted">
                   Task brief
                 </p>
               </div>
 
               <div class="px-4 py-3 space-y-3">
-                <p class="text-sm text-zinc-800 leading-relaxed">{msg.text}</p>
+                <p class="text-sm text-primary leading-relaxed">{msg.text}</p>
 
                 <div
                   :if={
                     is_binary(Map.get(msg, :question)) &&
                       String.trim(Map.get(msg, :question)) != ""
                   }
-                  class="rounded-lg border border-indigo-100 bg-indigo-50/80 px-3 py-2.5"
+                  class="rounded-lg border border-accent/20 bg-accent/10 px-3 py-2.5"
                   data-testid="interview-question"
                 >
-                  <p class="text-[11px] font-semibold uppercase tracking-wide text-indigo-600/90">
+                  <p class="text-[11px] font-semibold uppercase tracking-wide text-accent-text">
                     Next question
                   </p>
 
-                  <p class="mt-1 text-sm font-medium text-indigo-950 leading-snug">
+                  <p class="mt-1 text-sm font-medium text-primary leading-snug">
                     {Map.get(msg, :question)}
                   </p>
                 </div>
 
                 <dl
-                  class="grid grid-cols-1 gap-x-4 gap-y-2.5 border-t border-zinc-100 pt-3 sm:grid-cols-[6.5rem_1fr] text-sm"
+                  class="grid grid-cols-1 gap-x-4 gap-y-2.5 border-t border-raised-border pt-3 sm:grid-cols-[6.5rem_1fr] text-sm"
                   data-testid="interview-draft"
                 >
-                  <dt class="text-xs font-medium uppercase tracking-wide text-zinc-400 sm:pt-0.5">
+                  <dt class="text-xs font-medium uppercase tracking-wide text-muted sm:pt-0.5">
                     Title
                   </dt>
 
-                  <dd class="text-zinc-900 leading-snug break-words">
+                  <dd class="text-primary leading-snug break-words">
                     {format_draft_cell(msg.draft.title)}
                   </dd>
 
-                  <dt class="text-xs font-medium uppercase tracking-wide text-zinc-400 sm:pt-0.5">
+                  <dt class="text-xs font-medium uppercase tracking-wide text-muted sm:pt-0.5">
                     Owner
                   </dt>
 
-                  <dd class="text-zinc-900 leading-snug break-words">
+                  <dd class="text-primary leading-snug break-words">
                     {format_draft_cell(msg.draft.responsible)}
                   </dd>
 
-                  <dt class="text-xs font-medium uppercase tracking-wide text-zinc-400 sm:pt-0.5">
+                  <dt class="text-xs font-medium uppercase tracking-wide text-muted sm:pt-0.5">
                     Description
                   </dt>
 
-                  <dd class="text-zinc-900 leading-snug break-words">
+                  <dd class="text-primary leading-snug break-words">
                     {format_draft_cell(msg.draft.description)}
                   </dd>
 
-                  <dt class="text-xs font-medium uppercase tracking-wide text-zinc-400 sm:pt-0.5">
+                  <dt class="text-xs font-medium uppercase tracking-wide text-muted sm:pt-0.5">
                     Due
                   </dt>
 
-                  <dd class="text-zinc-900 leading-snug break-words">
+                  <dd class="text-primary leading-snug break-words">
                     {format_draft_cell(msg.draft.due_date)}
                   </dd>
                 </dl>
@@ -611,14 +611,14 @@ defmodule ElderWeb.SkillRunLive do
 
               <div
                 :if={Map.get(msg, :suggestions, []) != []}
-                class="flex flex-wrap gap-2 border-t border-zinc-100 bg-zinc-50/50 px-4 py-3"
+                class="flex flex-wrap gap-2 border-t border-raised-border bg-surface/50 px-4 py-3"
               >
                 <button
                   :for={s <- Map.get(msg, :suggestions, [])}
                   type="button"
                   phx-click="pick_suggestion"
                   phx-value-message={s.value}
-                  class="rounded-full border border-indigo-200/80 bg-white px-3.5 py-1.5 text-xs font-medium text-indigo-800 shadow-sm transition hover:border-indigo-300 hover:bg-indigo-50"
+                  class="rounded-full border border-accent/30 bg-surface px-3.5 py-1.5 text-xs font-medium text-accent-text shadow-sm transition hover:border-accent/50 hover:bg-surface-raised"
                 >
                   {s.label}
                 </button>
@@ -627,8 +627,8 @@ defmodule ElderWeb.SkillRunLive do
           </div>
 
           <div :if={@chat_loading} class="flex justify-start">
-            <div class="flex items-center gap-2 rounded-xl border border-zinc-200 bg-white px-4 py-2.5 text-sm text-zinc-500 shadow-sm">
-              <span class="animate-spin inline-block w-3.5 h-3.5 border-2 border-indigo-400 border-t-transparent rounded-full">
+            <div class="flex items-center gap-2 rounded-xl border border-base-border bg-surface px-4 py-2.5 text-sm text-muted shadow-sm">
+              <span class="animate-spin inline-block w-3.5 h-3.5 border-2 border-accent-text border-t-transparent rounded-full">
               </span>
               Thinking…
             </div>
@@ -645,11 +645,11 @@ defmodule ElderWeb.SkillRunLive do
             name="message"
             placeholder="Type your reply…"
             autofocus
-            class="block w-full rounded-lg border-zinc-300 shadow-sm text-sm focus:border-indigo-500 focus:ring-indigo-500 sm:min-w-0"
+            class="block w-full rounded-lg border-base-border shadow-sm text-sm focus:border-accent focus:ring-accent sm:min-w-0"
           />
           <button
             type="submit"
-            class="shrink-0 rounded-lg bg-indigo-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-indigo-500 sm:w-auto"
+            class="shrink-0 rounded-lg bg-accent px-5 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-accent/80 sm:w-auto"
           >
             Send
           </button>
@@ -657,8 +657,8 @@ defmodule ElderWeb.SkillRunLive do
       </div>
 
       <div :if={@phase == :streaming}>
-        <div class="flex items-center gap-2 mb-3 text-sm text-zinc-500">
-          <span class="animate-spin inline-block w-4 h-4 border-2 border-indigo-500 border-t-transparent rounded-full">
+        <div class="mb-3 flex items-center gap-2 text-sm text-muted">
+          <span class="animate-spin inline-block h-4 w-4 rounded-full border-2 border-accent-text border-t-transparent">
           </span>
           Generating...
         </div>
@@ -666,33 +666,33 @@ defmodule ElderWeb.SkillRunLive do
         <div
           id="token-stream"
           phx-update="stream"
-          class="rounded-md bg-zinc-50 border border-zinc-200 p-4 text-sm text-zinc-800 font-mono whitespace-pre-wrap min-h-32"
+          class="min-h-32 rounded-md border border-base-border bg-surface p-4 font-mono text-sm whitespace-pre-wrap text-primary"
         >
           <span :for={{dom_id, item} <- @streams.tokens} id={dom_id}>{item.text}</span>
         </div>
       </div>
 
       <div :if={@phase in [:done, :sending_to_asana, :asana_success]}>
-        <label class="block text-sm font-medium text-zinc-700 mb-1">Generated output</label>
-        <div class="brief-output rounded-md border border-zinc-200 bg-white p-4 min-h-40">
+        <label class="mb-1 block text-sm font-medium text-secondary">Generated output</label>
+        <div class="brief-output prose prose-invert prose-sm max-w-none min-h-40 rounded-md border border-base-border bg-surface-raised p-4">
           {raw(sanitize_llm_output(@llm_output))}
         </div>
 
         <div :if={@phase in [:done, :sending_to_asana]} class="mt-6 space-y-3">
-          <p class="text-sm font-medium text-zinc-700">Send to Asana</p>
+          <p class="text-sm font-medium text-secondary">Send to Asana</p>
 
-          <div :if={@asana_loading} class="flex items-center gap-2 text-sm text-zinc-400">
-            <span class="animate-spin inline-block w-3 h-3 border-2 border-zinc-400 border-t-transparent rounded-full">
+          <div :if={@asana_loading} class="flex items-center gap-2 text-sm text-muted">
+            <span class="animate-spin inline-block w-3 h-3 border-2 border-secondary border-t-transparent rounded-full">
             </span>
             Loading...
           </div>
 
           <div :if={not @asana_loading and @workspaces != []}>
-            <label class="block text-xs text-zinc-500 mb-1">Workspace</label>
+            <label class="block text-xs text-muted mb-1">Workspace</label>
             <form phx-change="select_workspace">
               <select
                 name="workspace_gid"
-                class="block w-full rounded-md border-zinc-300 text-sm shadow-sm focus:border-indigo-500 focus:ring-indigo-500"
+                class="block w-full rounded-md border-base-border text-sm shadow-sm focus:border-accent focus:ring-accent"
               >
                 <option value="">Select workspace...</option>
 
@@ -708,11 +708,11 @@ defmodule ElderWeb.SkillRunLive do
           </div>
 
           <div :if={@selected_workspace_gid && not @asana_loading && @projects != []}>
-            <label class="block text-xs text-zinc-500 mb-1">Project</label>
+            <label class="block text-xs text-muted mb-1">Project</label>
             <form phx-change="select_project">
               <select
                 name="project_gid"
-                class="block w-full rounded-md border-zinc-300 text-sm shadow-sm focus:border-indigo-500 focus:ring-indigo-500"
+                class="block w-full rounded-md border-base-border text-sm shadow-sm focus:border-accent focus:ring-accent"
               >
                 <option value="">Select project...</option>
 
@@ -728,13 +728,13 @@ defmodule ElderWeb.SkillRunLive do
           </div>
 
           <div :if={@selected_project_gid && not @asana_loading && @sections != []}>
-            <label class="block text-xs text-zinc-500 mb-1">Section (optional)</label>
+            <label class="block text-xs text-muted mb-1">Section</label>
             <form phx-change="select_section">
               <select
                 name="section_gid"
-                class="block w-full rounded-md border-zinc-300 text-sm shadow-sm focus:border-indigo-500 focus:ring-indigo-500"
+                class="block w-full rounded-md border-base-border text-sm shadow-sm focus:border-accent focus:ring-accent"
               >
-                <option value="">No section</option>
+                <option value="">Select section...</option>
 
                 <option
                   :for={s <- @sections}
@@ -751,12 +751,12 @@ defmodule ElderWeb.SkillRunLive do
             <button
               :if={@phase == :done}
               phx-click="send_to_asana"
-              disabled={is_nil(@selected_workspace_gid)}
+              disabled={is_nil(@selected_section_gid)}
               class={[
                 "rounded-md px-4 py-2 text-sm font-semibold text-white",
-                if(is_nil(@selected_workspace_gid),
-                  do: "bg-green-300 cursor-not-allowed",
-                  else: "bg-green-600 hover:bg-green-500"
+                if(is_nil(@selected_section_gid),
+                  do: "cursor-not-allowed bg-green-800/50",
+                  else: "bg-green-700 hover:bg-green-600"
                 )
               ]}
             >
@@ -765,28 +765,32 @@ defmodule ElderWeb.SkillRunLive do
             <button
               :if={@phase == :sending_to_asana}
               disabled
-              class="rounded-md bg-green-400 px-4 py-2 text-sm font-semibold text-white cursor-not-allowed"
+              class="cursor-not-allowed rounded-md bg-green-900/50 px-4 py-2 text-sm font-semibold text-green-300"
             >
               Sending...
             </button>
             <button
               phx-click="reset"
-              class="rounded-md bg-white px-4 py-2 text-sm font-medium text-zinc-700 ring-1 ring-zinc-300 hover:bg-zinc-50"
+              class="rounded-md bg-surface-raised px-4 py-2 text-sm font-medium text-primary ring-1 ring-raised-border hover:bg-surface"
             >
               Start over
             </button>
           </div>
+
+          <p :if={is_nil(@selected_section_gid)} class="text-xs text-muted">
+            Select a workspace, project, and section above before sending.
+          </p>
         </div>
 
         <div
           :if={@phase == :asana_success}
-          class="mt-4 rounded-md bg-green-50 p-4 text-sm text-green-800"
+          class="mt-4 rounded-md bg-green-900/30 p-4 text-sm text-green-300"
         >
           Task created:
           <a href={@asana_task_url} target="_blank" class="font-medium underline">View in Asana →</a>
           <button
             phx-click="reset"
-            class="ml-4 text-green-700 underline text-sm"
+            class="ml-4 text-green-400 underline text-sm"
           >
             Run again
           </button>

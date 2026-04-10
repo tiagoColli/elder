@@ -1,7 +1,7 @@
 <header class="px-4 sm:px-6 lg:px-8">
-  <div class="flex items-center justify-between border-b border-zinc-100 py-3 text-sm">
+  <div class="flex items-center justify-between border-b border-base-border py-3 text-sm">
     <div class="flex items-center gap-4">
-      <a href="/" class="font-semibold text-zinc-900 hover:text-zinc-700">
+      <a href="/" class="font-semibold text-primary hover:text-secondary">
         Elder
       </a>
     </div>
@@ -10,17 +10,18 @@
         <img
           :if={@current_user.avatar_url}
           src={@current_user.avatar_url}
+          alt=""
           class="h-7 w-7 rounded-full"
           referrerpolicy="no-referrer"
         />
-        <span class="text-zinc-700">
+        <span class="text-secondary">
           {@current_user.name || @current_user.email}
         </span>
       </div>
       <.link
         href="/auth/logout"
         method="delete"
-        class="text-zinc-500 hover:text-zinc-700 transition-colors"
+        class="text-muted hover:text-secondary transition-colors"
       >
         Sign out
       </.link>
