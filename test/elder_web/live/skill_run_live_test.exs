@@ -133,7 +133,7 @@ defmodule ElderWeb.SkillRunLiveTest do
       assert render(view) =~ "Thinking"
 
       json = ~S"""
-      {"status":"continue","draft":{"title":"Report task","responsible":null,"description":null,"due_date":null},"assistant_message":"Got it — we'll use that title.","question":"Who should own it?"}
+      {"status":"continue","draft":{"name":"Report task","responsible_email":null,"description":null,"due_on":null},"assistant_message":"Got it — we'll use that title.","question":"Who should own it?"}
       """
 
       send(view.pid, {:interview_done, {:ok, json}})
@@ -171,7 +171,7 @@ defmodule ElderWeb.SkillRunLiveTest do
       |> render_submit(%{"user_input" => "Unclear owner"})
 
       json = ~S"""
-      {"status":"continue","draft":{"title":null,"responsible":null,"description":null,"due_date":null},"assistant_message":"Who owns this?","suggestions":[{"label":"I will own it","value":"I'll take ownership."}]}
+      {"status":"continue","draft":{"name":null,"responsible_email":null,"description":null,"due_on":null},"assistant_message":"Who owns this?","suggestions":[{"label":"I will own it","value":"I'll take ownership."}]}
       """
 
       send(view.pid, {:interview_done, {:ok, json}})
