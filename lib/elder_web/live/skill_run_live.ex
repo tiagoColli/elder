@@ -3,7 +3,10 @@ defmodule ElderWeb.SkillRunLive do
   Executes a single skill: accepts user input, streams LLM tokens, and sends
   the result to Asana.
 
-  State machine: `:idle` → `:streaming` → `:done` → `:sending_to_asana` → `:asana_success`
+  State machine:
+  - Streaming path: `:idle` → `:streaming` → `:done` → `:sending_to_asana` → `:asana_success`
+  - Structured path: `:idle` → `:processing` → `:previewing` → `:sending_to_asana` → `:asana_success`
+
   Errors at any stage return to `:idle` or `:done` with an error message.
   """
 
@@ -12,11 +15,16 @@ defmodule ElderWeb.SkillRunLive do
   @compile {:no_warn_undefined, Elder.Asana}
 
   alias Elder.Asana
+  alias Elder.Asana.TaskDraft
   alias Elder.LLM
   alias Elder.LLM.InterviewResponse
   alias Elder.LLM.InterviewResponseDraft
   alias Elder.Skills
   alias Phoenix.PubSub
+
+  require Logger
+
+  @structured_required_fields [:name, :description]
 
   @impl Phoenix.LiveView
   def mount(%{"slug" => slug}, _session, socket) do
@@ -35,6 +43,7 @@ defmodule ElderWeb.SkillRunLive do
         skill: skill,
         review_skill: review_skill,
         skill_run: nil,
+        task_draft: nil,
         phase: :idle,
         user_input: "",
         llm_output: "",
@@ -83,27 +92,70 @@ defmodule ElderWeb.SkillRunLive do
     topic = "skill_run:#{socket.id}"
     PubSub.subscribe(Elder.PubSub, topic)
 
-    case socket.assigns.review_skill do
-      nil ->
-        :ok = LLM.stream_run(socket.assigns.skill, input, topic)
+    case {socket.assigns.review_skill, socket.assigns.skill.output_format} do
+      {nil, :structured_asana_task} ->
+        user_name = socket.assigns.current_user.name
+
+        :ok =
+          LLM.structured_run(socket.assigns.skill, input, TaskDraft.schema(), topic,
+            user_name: user_name
+          )
+
+        Logger.info(
+          "Skills Platform | skill_run_start | skill:#{socket.assigns.skill.slug} | structured",
+          feature: "Skills Platform",
+          step: "skill_run_start",
+          cid: socket.id
+        )
 
         socket =
           socket
-          |> assign(phase: :streaming, user_input: input, error: nil, token_count: 0)
+          |> assign(phase: :processing, user_input: input, error: nil, task_draft: nil)
           |> stream(:tokens, [], reset: true)
 
         {:noreply, socket}
 
-      review_skill ->
+      {nil, _format} ->
+        :ok = LLM.stream_run(socket.assigns.skill, input, topic)
+
+        Logger.info(
+          "Skills Platform | skill_run_start | skill:#{socket.assigns.skill.slug} | stream",
+          feature: "Skills Platform",
+          step: "skill_run_start",
+          cid: socket.id
+        )
+
+        socket =
+          socket
+          |> assign(
+            phase: :streaming,
+            user_input: input,
+            error: nil,
+            token_count: 0,
+            task_draft: nil
+          )
+          |> stream(:tokens, [], reset: true)
+
+        {:noreply, socket}
+
+      {review_skill, _format} ->
         conversation = [%{role: :user, text: input}]
         :ok = LLM.interview_run(review_skill, conversation, topic)
+
+        Logger.info(
+          "Skills Platform | skill_run_start | skill:#{socket.assigns.skill.slug} | interview",
+          feature: "Skills Platform",
+          step: "skill_run_start",
+          cid: socket.id
+        )
 
         socket =
           assign(socket,
             phase: :chatting,
             conversation: conversation,
             chat_loading: true,
-            error: nil
+            error: nil,
+            task_draft: nil
           )
 
         {:noreply, socket}
@@ -197,6 +249,7 @@ defmodule ElderWeb.SkillRunLive do
 
   def handle_event("send_to_asana", _params, socket) do
     skill_run = socket.assigns.skill_run
+    task_draft = socket.assigns.task_draft
     lv_pid = self()
 
     target = %{
@@ -208,7 +261,11 @@ defmodule ElderWeb.SkillRunLive do
     Task.start(fn ->
       result =
         try do
-          Asana.create_task(skill_run, target)
+          if task_draft do
+            Asana.create_task_from_draft(task_draft, target)
+          else
+            Asana.create_task(skill_run, target)
+          end
         rescue
           e -> {:error, {:exception, e}}
         end
@@ -220,10 +277,13 @@ defmodule ElderWeb.SkillRunLive do
   end
 
   def handle_event("reset", _params, socket) do
+    PubSub.unsubscribe(Elder.PubSub, "skill_run:#{socket.id}")
+
     socket =
       socket
       |> assign(
         skill_run: nil,
+        task_draft: nil,
         phase: :idle,
         user_input: "",
         llm_output: "",
@@ -270,6 +330,13 @@ defmodule ElderWeb.SkillRunLive do
 
     case Skills.save_run(attrs) do
       {:ok, skill_run} ->
+        Logger.info(
+          "Skills Platform | skill_run_save | skill:#{attrs.skill_slug} | ok",
+          feature: "Skills Platform",
+          step: "skill_run_save",
+          cid: socket.id
+        )
+
         socket =
           assign(socket,
             skill_run: skill_run,
@@ -281,6 +348,14 @@ defmodule ElderWeb.SkillRunLive do
         {:noreply, socket}
 
       {:error, _changeset} ->
+        Logger.error(
+          "Skills Platform | skill_run_save | skill:#{attrs.skill_slug} | error:changeset",
+          feature: "Skills Platform",
+          step: "skill_run_save",
+          cid: socket.id,
+          reason: :changeset_error
+        )
+
         socket =
           socket
           |> assign(phase: :idle, error: "Failed to save result. Please try again.")
@@ -288,6 +363,87 @@ defmodule ElderWeb.SkillRunLive do
 
         {:noreply, socket}
     end
+  end
+
+  def handle_info({:llm_object_done, {:ok, %{object: raw, cost_usd: cost, model: model}}}, socket) do
+    case TaskDraft.from_map(raw) do
+      {:ok, draft} ->
+        case Jason.encode(Map.from_struct(draft)) do
+          {:ok, encoded} ->
+            attrs = %{
+              skill_slug: socket.assigns.skill.slug,
+              user_id: socket.assigns.current_user.id,
+              user_input: socket.assigns.user_input,
+              llm_output: encoded,
+              model: model,
+              cost_usd: cost,
+              status: :done
+            }
+
+            case Skills.save_run(attrs) do
+              {:ok, skill_run} ->
+                Logger.info(
+                  "Skills Platform | skill_run_save | skill:#{attrs.skill_slug} | ok",
+                  feature: "Skills Platform",
+                  step: "skill_run_save",
+                  cid: socket.id
+                )
+
+                socket =
+                  assign(socket,
+                    skill_run: skill_run,
+                    phase: :previewing,
+                    task_draft: draft,
+                    llm_cost: cost
+                  )
+
+                {:noreply, socket}
+
+              {:error, _changeset} ->
+                Logger.error(
+                  "Skills Platform | skill_run_save | skill:#{attrs.skill_slug} | error:changeset",
+                  feature: "Skills Platform",
+                  step: "skill_run_save",
+                  cid: socket.id,
+                  reason: :changeset_error
+                )
+
+                {:noreply,
+                 assign(socket, phase: :idle, error: "Failed to save result. Please try again.")}
+            end
+
+          {:error, reason} ->
+            Logger.warning(
+              "Skills Platform | task_draft_encode | skill:#{socket.assigns.skill.slug} | error:json",
+              feature: "Skills Platform",
+              step: "task_draft_encode",
+              cid: socket.id,
+              reason: reason
+            )
+
+            {:noreply,
+             assign(socket, phase: :idle, error: "Failed to process result. Please try again.")}
+        end
+
+      {:error, _reason} ->
+        Logger.warning(
+          "Skills Platform | task_draft_parse | skill:#{socket.assigns.skill.slug} | error:invalid",
+          feature: "Skills Platform",
+          step: "task_draft_parse",
+          cid: socket.id,
+          reason: :invalid_task_draft
+        )
+
+        {:noreply,
+         assign(socket,
+           phase: :idle,
+           error: "Could not parse the generated task. Please try again."
+         )}
+    end
+  end
+
+  def handle_info({:llm_object_done, {:error, reason}}, socket) do
+    {:noreply, assign(socket, phase: :idle, error: format_llm_error(reason))}
   end
 
   def handle_info({:llm_error, reason}, socket) do
@@ -301,8 +457,18 @@ defmodule ElderWeb.SkillRunLive do
 
   def handle_info({:interview_done, {:ok, text}}, socket) do
     case InterviewResponse.parse(text) do
-      {:ok, %{status: :ready}} ->
-        {:noreply, interview_finish_to_streaming(socket)}
+      {:ok, %{status: :ready, draft: draft}} ->
+        case socket.assigns.skill.output_format do
+          :structured_asana_task ->
+            if required_interview_fields_present?(draft) do
+              {:noreply, interview_finish_to_structured(socket)}
+            else
+              {:noreply, inject_required_fields_error(socket, draft)}
+            end
+
+          _other ->
+            {:noreply, interview_finish_to_streaming(socket)}
+        end
 
       {:ok, %{status: :continue} = p} ->
         msg = %{
@@ -363,9 +529,11 @@ defmodule ElderWeb.SkillRunLive do
   end
 
   def handle_info({:asana_result, {:error, reason}}, socket) do
+    recovery_phase = if socket.assigns.task_draft, do: :previewing, else: :done
+
     {:noreply,
      assign(socket,
-       phase: :done,
+       phase: recovery_phase,
        error: "Could not create Asana task: #{inspect(reason)}"
      )}
   end
@@ -404,7 +572,87 @@ defmodule ElderWeb.SkillRunLive do
     html
     |> String.replace(~r/<body>/i, "")
     |> String.replace(~r/<\/body>/i, "")
-    |> String.trim()
+    |> HtmlSanitizeEx.basic_html()
+  end
+
+  defp asana_selectors(assigns) do
+    ~H"""
+    <p class="text-[10px] font-bold uppercase tracking-widest text-muted">
+      Where should this go?
+    </p>
+
+    <div :if={@asana_loading} class="flex items-center gap-2 text-sm text-muted">
+      <span class="animate-spin inline-block w-3 h-3 border-2 border-base-border border-t-transparent rounded-full">
+      </span>
+      Loading workspaces…
+    </div>
+
+    <div
+      :if={not @asana_loading and @workspaces != []}
+      class="grid grid-cols-[90px_1fr] items-center gap-3"
+    >
+      <label class="text-xs text-muted">Workspace</label>
+      <form phx-change="select_workspace">
+        <select
+          name="workspace_gid"
+          class="block w-full rounded-md border-base-border bg-field text-primary text-sm shadow-sm focus:border-accent focus:ring-accent"
+        >
+          <option value="">Select workspace…</option>
+          <option
+            :for={ws <- @workspaces}
+            value={ws.gid}
+            selected={ws.gid == @selected_workspace_gid}
+          >
+            {ws.name}
+          </option>
+        </select>
+      </form>
+    </div>
+
+    <div
+      :if={@selected_workspace_gid && not @asana_loading && @projects != []}
+      class="grid grid-cols-[90px_1fr] items-center gap-3"
+    >
+      <label class="text-xs text-muted">Project</label>
+      <form phx-change="select_project">
+        <select
+          name="project_gid"
+          class="block w-full rounded-md border-base-border bg-field text-primary text-sm shadow-sm focus:border-accent focus:ring-accent"
+        >
+          <option value="">Select project…</option>
+          <option
+            :for={p <- @projects}
+            value={p.gid}
+            selected={p.gid == @selected_project_gid}
+          >
+            {p.name}
+          </option>
+        </select>
+      </form>
+    </div>
+
+    <div
+      :if={@selected_project_gid && not @asana_loading && @sections != []}
+      class="grid grid-cols-[90px_1fr] items-center gap-3"
+    >
+      <label class="text-xs text-muted">Section</label>
+      <form phx-change="select_section">
+        <select
+          name="section_gid"
+          class="block w-full rounded-md border-base-border bg-field text-primary text-sm shadow-sm focus:border-accent focus:ring-accent"
+        >
+          <option value="">Select section…</option>
+          <option
+            :for={s <- @sections}
+            value={s.gid}
+            selected={s.gid == @selected_section_gid}
+          >
+            {s.name}
+          </option>
+        </select>
+      </form>
+    </div>
+    """
   end
 
   defp interview_finish_to_streaming(socket) do
@@ -424,6 +672,54 @@ defmodule ElderWeb.SkillRunLive do
       |> stream(:tokens, [], reset: true)
 
     socket
+  end
+
+  defp interview_finish_to_structured(socket) do
+    topic = "skill_run:#{socket.id}"
+    transcript = build_transcript(socket.assigns.conversation)
+    user_name = socket.assigns.current_user.name
+
+    :ok =
+      LLM.structured_run(socket.assigns.skill, transcript, TaskDraft.schema(), topic,
+        user_name: user_name
+      )
+
+    socket
+    |> assign(
+      phase: :processing,
+      user_input: transcript,
+      error: nil,
+      chat_loading: false
+    )
+    |> stream(:tokens, [], reset: true)
+  end
+
+  defp required_interview_fields_present?(%InterviewResponseDraft{} = draft) do
+    Enum.all?(@structured_required_fields, fn field ->
+      val = Map.get(draft, field)
+      is_binary(val) and byte_size(val) > 0
+    end)
+  end
+
+  defp inject_required_fields_error(socket, draft) do
+    missing =
+      @structured_required_fields
+      |> Enum.reject(fn field ->
+        val = Map.get(draft, field)
+        is_binary(val) and byte_size(val) > 0
+      end)
+      |> Enum.map_join(", ", &to_string/1)
+
+    msg = %{
+      role: :assistant,
+      text: "Before we can generate the task, I still need: #{missing}. Could you provide those?",
+      question: nil,
+      draft: draft,
+      suggestions: []
+    }
+
+    conversation = append_conversation_message(socket.assigns.conversation, msg)
+    assign(socket, conversation: conversation, chat_loading: false)
   end
 
   defp build_transcript(conversation) do
@@ -463,6 +759,16 @@ defmodule ElderWeb.SkillRunLive do
       ]
       |> Enum.filter(fn {_key, v} -> present_draft_value?(v) end)
       |> Enum.map(fn {k, v} -> "#{k}: #{v}" end)
+      |> then(fn base ->
+        case d.skipped_fields do
+          [] ->
+            base
+
+          fields ->
+            item = "skipped_fields: " <> Enum.join(fields, ", ")
+            Enum.reverse([item | Enum.reverse(base)])
+        end
+      end)
 
     case parts do
       [] -> nil
@@ -476,6 +782,10 @@ defmodule ElderWeb.SkillRunLive do
   defp format_draft_cell(value) when value in [nil, ""], do: "—"
   defp format_draft_cell(value) when is_binary(value), do: value
   defp format_draft_cell(_other), do: "—"
+
+  defp format_skipped_fields_cell([]), do: "—"
+  defp format_skipped_fields_cell(fields) when is_list(fields), do: Enum.join(fields, ", ")
+  defp format_skipped_fields_cell(_other), do: "—"
 
   @impl Phoenix.LiveView
   def render(assigns) do
@@ -510,6 +820,14 @@ defmodule ElderWeb.SkillRunLive do
             </button>
           </div>
         </form>
+      </div>
+
+      <div :if={@phase == :processing}>
+        <div class="flex items-center gap-3 py-10 justify-center text-sm text-secondary">
+          <span class="animate-spin inline-block h-5 w-5 rounded-full border-2 border-accent border-t-transparent">
+          </span>
+          Generating task…
+        </div>
       </div>
 
       <div :if={@phase == :chatting}>
@@ -576,7 +894,7 @@ defmodule ElderWeb.SkillRunLive do
                   data-testid="interview-draft"
                 >
                   <dt class="text-xs font-medium uppercase tracking-wide text-muted sm:pt-0.5">
-                    Title
+                    Name
                   </dt>
 
                   <dd class="text-primary leading-snug break-words">
@@ -605,6 +923,14 @@ defmodule ElderWeb.SkillRunLive do
 
                   <dd class="text-primary leading-snug break-words">
                     {format_draft_cell(msg.draft.due_on)}
+                  </dd>
+
+                  <dt class="text-xs font-medium uppercase tracking-wide text-muted sm:pt-0.5">
+                    Skipped
+                  </dt>
+
+                  <dd class="text-primary leading-snug break-words">
+                    {format_skipped_fields_cell(msg.draft.skipped_fields)}
                   </dd>
                 </dl>
               </div>
@@ -672,7 +998,120 @@ defmodule ElderWeb.SkillRunLive do
         </div>
       </div>
 
-      <div :if={@phase in [:done, :sending_to_asana, :asana_success]}>
+      <div :if={
+        @phase in [:previewing, :sending_to_asana, :asana_success] and not is_nil(@task_draft)
+      }>
+        <div class="rounded-xl border border-base-border bg-surface shadow-md overflow-hidden mb-6">
+          <%!-- Zone 1: Header --%>
+          <div class="border-b border-base-border bg-surface-raised px-5 py-3 flex items-center justify-between gap-3">
+            <span class="text-[10px] font-bold uppercase tracking-widest text-muted">
+              Task Preview
+            </span>
+            <div class="flex items-center gap-2">
+              <span
+                :if={@task_draft.due_on}
+                class="inline-flex items-center gap-1 rounded-full border border-base-border bg-surface px-2.5 py-0.5 text-xs text-secondary"
+              >
+                <.icon name="hero-calendar-days-mini" class="h-3 w-3" />
+                {@task_draft.due_on}
+              </span>
+              <span
+                :if={@task_draft.assignee_email}
+                class="inline-flex items-center gap-1 rounded-full border border-base-border bg-surface px-2.5 py-0.5 text-xs text-secondary"
+              >
+                <.icon name="hero-user-mini" class="h-3 w-3" />
+                {@task_draft.assignee_email}
+              </span>
+            </div>
+          </div>
+
+          <%!-- Zone 2: Content --%>
+          <div class="px-5 pt-5 pb-4 space-y-4">
+            <h2 class="text-[17px] font-semibold text-primary leading-snug">
+              {@task_draft.name}
+            </h2>
+            <div class="brief-output prose prose-invert prose-sm max-w-none">
+              {raw(sanitize_llm_output(@task_draft.html_notes))}
+            </div>
+          </div>
+
+          <%!-- Zone 3a: Destination selectors --%>
+          <div
+            :if={@phase in [:previewing, :sending_to_asana]}
+            class="border-t border-base-border bg-page px-5 py-4 space-y-3"
+          >
+            <.asana_selectors
+              asana_loading={@asana_loading}
+              workspaces={@workspaces}
+              projects={@projects}
+              sections={@sections}
+              selected_workspace_gid={@selected_workspace_gid}
+              selected_project_gid={@selected_project_gid}
+              selected_section_gid={@selected_section_gid}
+            />
+
+            <div class="flex items-center gap-3 pt-1">
+              <button
+                :if={@phase == :previewing}
+                phx-click="send_to_asana"
+                disabled={is_nil(@selected_section_gid)}
+                class={[
+                  "flex-1 rounded-md px-4 py-2.5 text-sm font-semibold text-white",
+                  if(is_nil(@selected_section_gid),
+                    do: "cursor-not-allowed bg-green-900/40 text-green-700",
+                    else: "bg-green-600 hover:bg-green-500"
+                  )
+                ]}
+              >
+                Send to Asana →
+              </button>
+
+              <button
+                :if={@phase == :sending_to_asana}
+                disabled
+                class="flex-1 cursor-not-allowed rounded-md bg-green-800/40 px-4 py-2.5 text-sm font-semibold text-green-400"
+              >
+                Sending…
+              </button>
+
+              <button
+                :if={@phase == :previewing}
+                phx-click="reset"
+                class="rounded-md border border-base-border px-4 py-2.5 text-sm font-medium text-secondary hover:text-primary"
+              >
+                Start over
+              </button>
+            </div>
+
+            <p :if={is_nil(@selected_section_gid) and not @asana_loading} class="text-xs text-muted">
+              Select a workspace, project, and section before sending.
+            </p>
+          </div>
+
+          <%!-- Zone 3b: Success footer --%>
+          <div
+            :if={@phase == :asana_success}
+            class="border-t border-green-900/50 bg-green-950/40 px-5 py-4 flex items-center justify-between gap-4"
+          >
+            <div class="flex items-center gap-3">
+              <.icon name="hero-check-circle-mini" class="h-5 w-5 text-green-400 shrink-0" />
+              <p class="text-sm font-semibold text-green-300">Task created in Asana</p>
+            </div>
+            <div class="flex items-center gap-4 text-sm">
+              <a href={@asana_task_url} target="_blank" class="font-medium text-green-400 underline">
+                View in Asana →
+              </a>
+              <button phx-click="reset" class="text-green-600 hover:text-green-400">
+                Run again
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div :if={
+        @phase == :done or (@phase in [:sending_to_asana, :asana_success] and is_nil(@task_draft))
+      }>
         <label class="mb-1 block text-sm font-medium text-secondary">Generated output</label>
         <div class="brief-output prose prose-invert prose-sm max-w-none min-h-40 rounded-md border border-base-border bg-surface-raised p-4">
           {raw(sanitize_llm_output(@llm_output))}
@@ -681,71 +1120,15 @@ defmodule ElderWeb.SkillRunLive do
         <div :if={@phase in [:done, :sending_to_asana]} class="mt-6 space-y-3">
           <p class="text-sm font-medium text-secondary">Send to Asana</p>
 
-          <div :if={@asana_loading} class="flex items-center gap-2 text-sm text-muted">
-            <span class="animate-spin inline-block w-3 h-3 border-2 border-secondary border-t-transparent rounded-full">
-            </span>
-            Loading...
-          </div>
-
-          <div :if={not @asana_loading and @workspaces != []}>
-            <label class="block text-xs text-muted mb-1">Workspace</label>
-            <form phx-change="select_workspace">
-              <select
-                name="workspace_gid"
-                class="block w-full rounded-md border-base-border text-sm shadow-sm focus:border-accent focus:ring-accent"
-              >
-                <option value="">Select workspace...</option>
-
-                <option
-                  :for={ws <- @workspaces}
-                  value={ws.gid}
-                  selected={ws.gid == @selected_workspace_gid}
-                >
-                  {ws.name}
-                </option>
-              </select>
-            </form>
-          </div>
-
-          <div :if={@selected_workspace_gid && not @asana_loading && @projects != []}>
-            <label class="block text-xs text-muted mb-1">Project</label>
-            <form phx-change="select_project">
-              <select
-                name="project_gid"
-                class="block w-full rounded-md border-base-border text-sm shadow-sm focus:border-accent focus:ring-accent"
-              >
-                <option value="">Select project...</option>
-
-                <option
-                  :for={p <- @projects}
-                  value={p.gid}
-                  selected={p.gid == @selected_project_gid}
-                >
-                  {p.name}
-                </option>
-              </select>
-            </form>
-          </div>
-
-          <div :if={@selected_project_gid && not @asana_loading && @sections != []}>
-            <label class="block text-xs text-muted mb-1">Section</label>
-            <form phx-change="select_section">
-              <select
-                name="section_gid"
-                class="block w-full rounded-md border-base-border text-sm shadow-sm focus:border-accent focus:ring-accent"
-              >
-                <option value="">Select section...</option>
-
-                <option
-                  :for={s <- @sections}
-                  value={s.gid}
-                  selected={s.gid == @selected_section_gid}
-                >
-                  {s.name}
-                </option>
-              </select>
-            </form>
-          </div>
+          <.asana_selectors
+            asana_loading={@asana_loading}
+            workspaces={@workspaces}
+            projects={@projects}
+            sections={@sections}
+            selected_workspace_gid={@selected_workspace_gid}
+            selected_project_gid={@selected_project_gid}
+            selected_section_gid={@selected_section_gid}
+          />
 
           <div class="flex items-center gap-3 pt-1">
             <button
