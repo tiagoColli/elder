@@ -40,3 +40,27 @@ select {
 textarea::placeholder {
   color: rgb(var(--color-muted));
 }
+
+.brief-output h1,
+.brief-output h2,
+.brief-output h3 {
+  font-size: 0.625rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  color: rgb(var(--color-accent));
+  margin-bottom: 0.25rem;
+  margin-top: 0.875rem;
+}
+
+.brief-output h1:first-child,
+.brief-output h2:first-child,
+.brief-output h3:first-child {
+  margin-top: 0;
+}
+
+.brief-output p {
+  font-size: 0.84375rem;
+  line-height: 1.65;
+  color: rgb(var(--color-secondary));
+}
