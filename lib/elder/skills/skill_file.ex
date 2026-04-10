@@ -7,6 +7,8 @@ defmodule Elder.Skills.SkillFile do
   dependency inclusion via `includes:`, and `{{template}}` substitution.
   """
 
+  require Logger
+
   @skills_dir Application.app_dir(:elder, "priv/skills")
 
   @typedoc "Raw frontmatter fields parsed from a skill file."
@@ -25,7 +27,8 @@ defmodule Elder.Skills.SkillFile do
           description: String.t(),
           version: String.t(),
           system_prompt: String.t(),
-          review_slug: String.t() | nil
+          review_slug: String.t() | nil,
+          output_format: :structured_asana_task | nil
         }
 
   @doc "Loads and resolves a skill by slug, including dependencies and template substitution. Raises if not found."
@@ -55,7 +58,8 @@ defmodule Elder.Skills.SkillFile do
       description: Map.get(metadata, :description, ""),
       version: Map.get(metadata, :version, "1"),
       system_prompt: system_prompt,
-      review_slug: Map.get(metadata, :review_slug, nil)
+      review_slug: Map.get(metadata, :review_slug, nil),
+      output_format: parse_output_format(Map.get(metadata, :output_format))
     }
   end
 
@@ -76,9 +80,19 @@ defmodule Elder.Skills.SkillFile do
         File.dir?(path) and File.exists?(Path.join(path, "skill.md"))
       end)
 
-    (flat_slugs ++ dir_slugs)
-    |> Enum.reject(&String.starts_with?(&1, "standards/"))
-    |> Enum.map(&read!/1)
+    skills =
+      (flat_slugs ++ dir_slugs)
+      |> Enum.reject(&String.starts_with?(&1, "standards/"))
+      |> Enum.map(&read!/1)
+
+    Logger.info("Skills Platform | skill_list | all | count:#{length(skills)}",
+      feature: "Skills Platform",
+      step: "skill_list",
+      cid: "all",
+      count: length(skills)
+    )
+
+    skills
   end
 
   # sobelow_skip ["Traversal.FileModule"]
@@ -142,7 +156,8 @@ defmodule Elder.Skills.SkillFile do
     "description" => :description,
     "version" => :version,
     "includes" => :includes,
-    "review" => :review_slug
+    "review" => :review_slug,
+    "output_format" => :output_format
   }
 
   defp parse_frontmatter(raw) do
@@ -168,4 +183,7 @@ defmodule Elder.Skills.SkillFile do
     end)
     |> Map.update(:includes, [], &Enum.reverse/1)
   end
+
+  defp parse_output_format("structured_asana_task"), do: :structured_asana_task
+  defp parse_output_format(_format), do: nil
 end

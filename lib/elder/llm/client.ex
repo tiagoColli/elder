@@ -30,14 +30,85 @@ defmodule Elder.LLM.Client do
   @doc "Runs a non-streaming LLM request asynchronously, broadcasting `{:interview_done, result}` to the topic."
   @spec call(term(), String.t(), String.t()) :: :ok
   def call(context, model, pubsub_topic) do
+    Logger.info("Skills Platform | llm_interview_start | topic:#{pubsub_topic} | ok",
+      feature: "Skills Platform",
+      step: "llm_interview_start",
+      cid: pubsub_topic
+    )
+
     Task.Supervisor.start_child(Elder.LLM.TaskSupervisor, fn ->
       result =
         case ReqLLM.generate_text(model, context) do
-          {:ok, response} -> {:ok, ReqLLM.Response.text(response)}
-          {:error, reason} -> {:error, reason}
+          {:ok, response} ->
+            Logger.info("Skills Platform | llm_interview_done | topic:#{pubsub_topic} | ok",
+              feature: "Skills Platform",
+              step: "llm_interview_done",
+              cid: pubsub_topic
+            )
+
+            {:ok, ReqLLM.Response.text(response)}
+
+          {:error, reason} ->
+            Logger.error(
+              "Skills Platform | llm_interview | topic:#{pubsub_topic} | error:call",
+              feature: "Skills Platform",
+              step: "llm_interview",
+              cid: pubsub_topic,
+              reason: :call_error
+            )
+
+            {:error, reason}
         end
 
       PubSub.broadcast(Elder.PubSub, pubsub_topic, {:interview_done, result})
+    end)
+
+    :ok
+  end
+
+  @doc "Runs a structured object generation request asynchronously, broadcasting `{:llm_object_done, result}` to the topic."
+  @spec generate_object(term(), map(), String.t(), String.t()) :: :ok
+  def generate_object(context, schema, model, pubsub_topic) do
+    Logger.info("Skills Platform | llm_object_start | topic:#{pubsub_topic} | ok",
+      feature: "Skills Platform",
+      step: "llm_object_start",
+      cid: pubsub_topic
+    )
+
+    Task.Supervisor.start_child(Elder.LLM.TaskSupervisor, fn ->
+      result =
+        case ReqLLM.generate_object(model, context, schema) do
+          {:ok, response} ->
+            usage = ReqLLM.Response.usage(response) || %{}
+            cost = Map.get(usage, :total_cost, 0.0)
+
+            Logger.info(
+              "Skills Platform | llm_object_done | topic:#{pubsub_topic} | ok",
+              feature: "Skills Platform",
+              step: "llm_object_done",
+              cid: pubsub_topic
+            )
+
+            {:ok,
+             %{
+               object: ReqLLM.Response.object(response),
+               cost_usd: cost,
+               model: model
+             }}
+
+          {:error, reason} ->
+            Logger.error(
+              "Skills Platform | llm_object | topic:#{pubsub_topic} | error:generate",
+              feature: "Skills Platform",
+              step: "llm_object",
+              cid: pubsub_topic,
+              reason: :generate_error
+            )
+
+            {:error, reason}
+        end
+
+      PubSub.broadcast(Elder.PubSub, pubsub_topic, {:llm_object_done, result})
     end)
 
     :ok

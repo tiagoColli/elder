@@ -6,4 +6,11 @@ defmodule Elder.LLM.ClientBehaviour do
   @callback stream(context :: term(), model :: String.t(), pubsub_topic :: String.t()) :: :ok
 
   @callback call(context :: term(), model :: String.t(), pubsub_topic :: String.t()) :: :ok
+
+  @callback generate_object(
+              context :: term(),
+              schema :: map(),
+              model :: String.t(),
+              pubsub_topic :: String.t()
+            ) :: :ok
 end

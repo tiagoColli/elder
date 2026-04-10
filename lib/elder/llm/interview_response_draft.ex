@@ -2,15 +2,23 @@ defmodule Elder.LLM.InterviewResponseDraft do
   @moduledoc """
   Task-shaped fields extracted from an LLM interview reply JSON `draft` object.
 
-  Populated by `Elder.LLM.InterviewResponse.parse/1`; not persisted as its own entity.
+  Not persisted as its own entity. GID values come from the UI, not the LLM.
+  `skipped_fields` lists optional fields the user skipped.
   """
 
-  defstruct [:title, :responsible, :description, :due_date]
+  defstruct [
+    :name,
+    :description,
+    :due_on,
+    :responsible_email,
+    skipped_fields: []
+  ]
 
   @type t :: %__MODULE__{
-          title: String.t() | nil,
-          responsible: String.t() | nil,
+          name: String.t() | nil,
           description: String.t() | nil,
-          due_date: String.t() | nil
+          due_on: String.t() | nil,
+          responsible_email: String.t() | nil,
+          skipped_fields: [String.t()]
         }
 end
