@@ -82,6 +82,11 @@ defmodule Elder.LLM.InterviewResponse do
          {:ok, status} <- parse_status(map["status"]),
          {:ok, draft} <- parse_draft(map["draft"]),
          {:ok, assistant_message} <- require_string(map["assistant_message"]) do
+      draft =
+        struct!(draft,
+          skipped_fields: parse_skipped_field_names(Map.get(map, "skipped_fields", []))
+        )
+
       {:ok,
        %__MODULE__{
          status: status,
@@ -101,15 +106,15 @@ defmodule Elder.LLM.InterviewResponse do
   defp parse_status(_invalid_status), do: {:error, :invalid_interview_status}
 
   defp parse_draft(draft) when is_map(draft) do
-    keys = ["title", "responsible", "description", "due_date"]
+    required_keys = ["name", "responsible_email", "description", "due_on"]
 
-    if Enum.all?(keys, &Map.has_key?(draft, &1)) do
+    if Enum.all?(required_keys, &Map.has_key?(draft, &1)) do
       {:ok,
        %InterviewResponseDraft{
-         title: optional_string(draft["title"]),
-         responsible: optional_string(draft["responsible"]),
+         name: optional_string(draft["name"]),
          description: optional_string(draft["description"]),
-         due_date: optional_string(draft["due_date"])
+         due_on: optional_string(draft["due_on"]),
+         responsible_email: optional_string(draft["responsible_email"])
        }}
     else
       {:error, :invalid_interview_json}
@@ -135,4 +140,13 @@ defmodule Elder.LLM.InterviewResponse do
   end
 
   defp parse_suggestions(_not_list), do: []
+
+  defp parse_skipped_field_names(list) when is_list(list) do
+    Enum.flat_map(list, fn
+      s when is_binary(s) -> [s]
+      _item -> []
+    end)
+  end
+
+  defp parse_skipped_field_names(_not_list), do: []
 end

@@ -3,6 +3,7 @@ slug: create-asana-task
 name: Create Asana Task
 description: Converts a plain-language brief into a structured, well-formatted Asana task description ready to paste into Asana.
 review: create-asana-task-review
+output_format: structured_asana_task
 includes:
   - standards/asana-output-rules
 version: 1
@@ -37,10 +38,15 @@ Identify and structure as many of these sections as the brief supports:
 - Keep language professional and concise — no filler phrases
 - Preserve all URLs mentioned by the user as `<a href="URL">descriptive label</a>` links in a References section
 
-## Output format
+## Fields to extract
 
-Produce only the `<body>...</body>` block. Follow the Asana Output Rules included above for all formatting decisions.
+Use the current date injected at the start of the system prompt to resolve any relative date expressions (e.g. "next Monday", "end of week") into a concrete `YYYY-MM-DD` value for the due date.
 
-Use the template below as the exact structure. Replace each `[placeholder]` with the extracted content. Omit any section for which the user provided no information — do not include the `<h1>` header for empty sections.
+| Field | What to put here |
+|-------|-----------------|
+| `name` | Concise task title derived from the brief (max 100 chars, same language as the brief) |
+| `due_on` | Due date in `YYYY-MM-DD` if the brief mentions a deadline; `null` otherwise |
+| `assignee_email` | Email of the responsible person **only if explicitly stated**; `null` otherwise |
+| `html_notes` | The full task description as a `<body>…</body>` HTML block following the template below |
 
 {{template}}

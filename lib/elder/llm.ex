@@ -33,4 +33,22 @@ defmodule Elder.LLM do
     context = ContextBuilder.build_conversation(review_skill, conversation)
     @llm_client.call(context, model, pubsub_topic)
   end
+
+  @doc """
+  Generates a structured object from a skill run, broadcasting the result to a PubSub topic.
+
+  `schema` is a JSON Schema map describing the expected object shape; the caller provides it.
+  `opts` are forwarded to `ContextBuilder.build/3` for context injection (e.g. `user_name: "Alice"`).
+  Broadcasts `{:llm_object_done, {:ok, %{object: map, cost_usd: float, model: String.t()}}}` or
+  `{:llm_object_done, {:error, reason}}`.
+  """
+  @spec structured_run(map(), String.t(), map(), String.t(), keyword()) :: :ok
+  def structured_run(skill, user_input, schema, pubsub_topic, opts \\ []) do
+    model = Application.get_env(:elder, Elder.LLM)[:model] || "google:gemini-2.5-flash"
+
+    context =
+      ContextBuilder.build(skill, user_input, Keyword.put_new(opts, :inject_context, true))
+
+    @llm_client.generate_object(context, schema, model, pubsub_topic)
+  end
 end
