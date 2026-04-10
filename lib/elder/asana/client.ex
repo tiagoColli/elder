@@ -98,6 +98,9 @@ defmodule Elder.Asana.Client do
 
         {:error, {:asana_api_error, status, body}}
 
+      {:error, {:missing_config, :asana_pat}} = err ->
+        err
+
       {:error, reason} ->
         Logger.error(
           "Skills Platform | asana_list_workspaces | all | error:network",
@@ -107,7 +110,7 @@ defmodule Elder.Asana.Client do
           reason: :network_error
         )
 
-        {:error, reason}
+        {:error, {:network_error, reason}}
     end
   end
 
@@ -144,6 +147,9 @@ defmodule Elder.Asana.Client do
 
         {:error, {:asana_api_error, status, body}}
 
+      {:error, {:missing_config, :asana_pat}} = err ->
+        err
+
       {:error, reason} ->
         Logger.error(
           "Skills Platform | asana_list_projects | workspace:#{workspace_gid} | error:network",
@@ -153,7 +159,7 @@ defmodule Elder.Asana.Client do
           reason: :network_error
         )
 
-        {:error, reason}
+        {:error, {:network_error, reason}}
     end
   end
 
@@ -163,8 +169,7 @@ defmodule Elder.Asana.Client do
   def list_sections(project_gid) do
     with {:ok, pat} <- fetch_pat(),
          {:ok, %Req.Response{status: 200, body: %{"data" => data}}} <-
-           Req.get("#{@base_url}/sections",
-             params: [project: project_gid],
+           Req.get("#{@base_url}/projects/#{project_gid}/sections",
              headers: [authorization(pat)]
            ) do
       sections = Enum.map(data, &%{gid: &1["gid"], name: &1["name"]})
@@ -190,6 +195,9 @@ defmodule Elder.Asana.Client do
 
         {:error, {:asana_api_error, status, body}}
 
+      {:error, {:missing_config, :asana_pat}} = err ->
+        err
+
       {:error, reason} ->
         Logger.error(
           "Skills Platform | asana_list_sections | project:#{project_gid} | error:network",
@@ -199,7 +207,7 @@ defmodule Elder.Asana.Client do
           reason: :network_error
         )
 
-        {:error, reason}
+        {:error, {:network_error, reason}}
     end
   end
 
