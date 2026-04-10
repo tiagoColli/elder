@@ -456,10 +456,10 @@ defmodule ElderWeb.SkillRunLive do
   defp draft_transcript_line(%InterviewResponseDraft{} = d) do
     parts =
       [
-        {:title, d.title},
-        {:responsible, d.responsible},
+        {:name, d.name},
+        {:responsible_email, d.responsible_email},
         {:description, d.description},
-        {:due_date, d.due_date}
+        {:due_on, d.due_on}
       ]
       |> Enum.filter(fn {_key, v} -> present_draft_value?(v) end)
       |> Enum.map(fn {k, v} -> "#{k}: #{v}" end)
@@ -580,7 +580,7 @@ defmodule ElderWeb.SkillRunLive do
                   </dt>
 
                   <dd class="text-primary leading-snug break-words">
-                    {format_draft_cell(msg.draft.title)}
+                    {format_draft_cell(msg.draft.name)}
                   </dd>
 
                   <dt class="text-xs font-medium uppercase tracking-wide text-muted sm:pt-0.5">
@@ -588,7 +588,7 @@ defmodule ElderWeb.SkillRunLive do
                   </dt>
 
                   <dd class="text-primary leading-snug break-words">
-                    {format_draft_cell(msg.draft.responsible)}
+                    {format_draft_cell(msg.draft.responsible_email)}
                   </dd>
 
                   <dt class="text-xs font-medium uppercase tracking-wide text-muted sm:pt-0.5">
@@ -604,7 +604,7 @@ defmodule ElderWeb.SkillRunLive do
                   </dt>
 
                   <dd class="text-primary leading-snug break-words">
-                    {format_draft_cell(msg.draft.due_date)}
+                    {format_draft_cell(msg.draft.due_on)}
                   </dd>
                 </dl>
               </div>
