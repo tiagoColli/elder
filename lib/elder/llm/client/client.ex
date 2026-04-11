@@ -57,7 +57,7 @@ defmodule Elder.LLM.Client do
         end
 
       case result do
-        {:ok, _} ->
+        {:ok, _result} ->
           Logger.info("LLM Client | call_complete | model:#{model} | ok",
             feature: "LLM Client",
             step: "call_complete",

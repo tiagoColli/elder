@@ -16,9 +16,10 @@ defmodule ElderWeb.SkillRunLive do
 
   alias Elder.Asana
   alias Elder.Asana.Artifacts.Draft
+  alias Elder.Asana.ResponseHandler
   alias Elder.Asana.TaskDraft
   alias Elder.Chat.Conversation
-  alias Elder.Chat.Session, as: ChatSession
+  alias Elder.Chat.Session
   alias Elder.LLM
   alias Elder.Skills
 
@@ -135,10 +136,10 @@ defmodule ElderWeb.SkillRunLive do
         )
 
         {:ok, session} =
-          ChatSession.start(
+          Session.start(
             review_skill,
             input,
-            &Elder.Asana.ResponseHandler.handle/1,
+            &ResponseHandler.handle/1,
             caller: self()
           )
 
@@ -164,7 +165,7 @@ defmodule ElderWeb.SkillRunLive do
   end
 
   def handle_event("chat_reply", %{"message" => message}, socket) do
-    case ChatSession.continue(socket.assigns.session, message) do
+    case Session.continue(socket.assigns.session, message) do
       {:ok, session} ->
         {:noreply, assign(socket, session: session, chat_loading: true, error: nil)}
 
@@ -182,7 +183,7 @@ defmodule ElderWeb.SkillRunLive do
   end
 
   def handle_event("pick_suggestion", %{"message" => message}, socket) do
-    case ChatSession.continue(socket.assigns.session, message) do
+    case Session.continue(socket.assigns.session, message) do
       {:ok, session} ->
         {:noreply, assign(socket, session: session, chat_loading: true, error: nil)}
 
@@ -380,7 +381,7 @@ defmodule ElderWeb.SkillRunLive do
   end
 
   def handle_info({:interview_done, {:ok, text}}, socket) do
-    case ChatSession.handle_response(socket.assigns.session, text) do
+    case Session.handle_response(socket.assigns.session, text) do
       {:ok, session, :continue} ->
         {:noreply, assign(socket, session: session, chat_loading: false, error: nil)}
 
@@ -408,7 +409,7 @@ defmodule ElderWeb.SkillRunLive do
   end
 
   def handle_info({:interview_done, {:error, reason}}, socket) do
-    {:ok, session} = ChatSession.handle_error(socket.assigns.session, reason)
+    {:ok, session} = Session.handle_error(socket.assigns.session, reason)
 
     {:noreply,
      assign(socket, session: session, chat_loading: false, error: format_llm_error(reason))}
@@ -642,7 +643,7 @@ defmodule ElderWeb.SkillRunLive do
   end
 
   defp interview_finish_to_streaming(socket, session) do
-    case ChatSession.finish(session) do
+    case Session.finish(session) do
       {:ok, completed_session, transcript} ->
         :ok = LLM.stream_run(socket.assigns.skill, transcript, caller: self())
 
@@ -666,7 +667,7 @@ defmodule ElderWeb.SkillRunLive do
   end
 
   defp interview_finish_to_structured(socket, session) do
-    case ChatSession.finish(session) do
+    case Session.finish(session) do
       {:ok, completed_session, transcript} ->
         user_name = socket.assigns.current_user.name
 
@@ -694,8 +695,13 @@ defmodule ElderWeb.SkillRunLive do
     end
   end
 
-  defp required_interview_fields_present?(%ChatSession{} = session) do
-    case session |> ChatSession.messages() |> List.last() do
+  defp required_interview_fields_present?(%Session{} = session) do
+    last_message =
+      session
+      |> Session.messages()
+      |> List.last()
+
+    case last_message do
       %{artifacts: artifacts} ->
         case Enum.find(artifacts, &is_struct(&1, Draft)) do
           nil ->
@@ -716,7 +722,7 @@ defmodule ElderWeb.SkillRunLive do
   defp inject_required_fields_error(socket, session) do
     draft =
       session
-      |> ChatSession.messages()
+      |> Session.messages()
       |> List.last()
       |> then(fn %{artifacts: artifacts} -> Enum.find(artifacts, &is_struct(&1, Draft)) end)
 
@@ -730,7 +736,7 @@ defmodule ElderWeb.SkillRunLive do
 
     {:ok, conversation} =
       Conversation.add_assistant_message(
-        ChatSession.conversation(session),
+        Session.conversation(session),
         "Before we can generate the task, I still need: #{missing}. Could you provide those?",
         artifacts: [draft]
       )
@@ -802,7 +808,7 @@ defmodule ElderWeb.SkillRunLive do
       <div :if={@phase == :chatting}>
         <div class="space-y-5 mb-8">
           <div
-            :for={msg <- ChatSession.messages(@session)}
+            :for={msg <- Session.messages(@session)}
             class={[
               "flex w-full",
               if(msg.role == :user, do: "justify-end", else: "justify-start")

@@ -36,13 +36,16 @@ defmodule Elder.Chat.SessionTest do
   end
 
   defp make_awaiting_llm_session(opts \\ []) do
-    {:ok, conv} = Conversation.new()
-    {:ok, conv} = Conversation.add_user_message(conv, "Create a campaign brief")
+    {:ok, new_conversation} = Conversation.new()
+
+    {:ok, updated_conversation} =
+      Conversation.add_user_message(new_conversation, "Create a campaign brief")
+
     handler = Keyword.get(opts, :response_handler, handler_continue())
 
     %Session{
       id: Ecto.UUID.generate(),
-      conversation: conv,
+      conversation: updated_conversation,
       review_skill: @review_skill,
       caller: self(),
       response_handler: handler,
@@ -138,7 +141,11 @@ defmodule Elder.Chat.SessionTest do
 
       assert updated.status == :awaiting_user
 
-      last_msg = Session.messages(updated) |> List.last()
+      last_msg =
+        updated
+        |> Session.messages()
+        |> List.last()
+
       assert last_msg.role == :assistant
       assert last_msg.text == "Got the title. Who should own it?"
     end
@@ -153,11 +160,17 @@ defmodule Elder.Chat.SessionTest do
 
     test "uses default Ready text when handler ready response has no :text key" do
       session =
-        make_awaiting_llm_session(response_handler: fn _ -> {:ready, %{artifacts: []}} end)
+        make_awaiting_llm_session(
+          response_handler: fn _response -> {:ready, %{artifacts: []}} end
+        )
 
       {:ok, updated, :ready} = Session.handle_response(session, "[READY]")
 
-      last_msg = Session.messages(updated) |> List.last()
+      last_msg =
+        updated
+        |> Session.messages()
+        |> List.last()
+
       assert last_msg.text == "Ready."
     end
 
