@@ -1,16 +1,16 @@
 defmodule Elder.LLM.ClientBehaviour do
   @moduledoc """
-  Behaviour contract for the LLM client (streaming and interview calls).
+  Behaviour defining the LLM client contract for streaming and text generation.
   """
 
-  @callback stream(context :: term(), model :: String.t(), pubsub_topic :: String.t()) :: :ok
+  @callback stream(context :: term(), model :: String.t(), opts :: keyword()) :: :ok
 
-  @callback call(context :: term(), model :: String.t(), pubsub_topic :: String.t()) :: :ok
+  @callback call(context :: term(), model :: String.t(), opts :: keyword()) :: :ok
 
   @callback generate_object(
               context :: term(),
               schema :: map(),
               model :: String.t(),
-              pubsub_topic :: String.t()
+              opts :: keyword()
             ) :: :ok
 end

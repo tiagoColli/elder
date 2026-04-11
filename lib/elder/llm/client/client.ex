@@ -1,79 +1,98 @@
 defmodule Elder.LLM.Client do
   @moduledoc """
-  Streams LLM responses asynchronously, broadcasting tokens via PubSub.
+  Sends LLM requests via `ReqLLM` and dispatches results as messages to the caller process.
 
-  Implements `Elder.LLM.ClientBehaviour` using ReqLLM.
+  All public functions enqueue a supervised async task and return `:ok` immediately.
   """
 
   @behaviour Elder.LLM.ClientBehaviour
 
-  alias Phoenix.PubSub
-
   require Logger
 
-  @doc "Starts an async LLM stream, broadcasting `:llm_token`, `:llm_done`, or `:llm_error` to the topic."
-  @spec stream(term(), String.t(), String.t()) :: :ok
-  def stream(context, model, pubsub_topic) do
-    Logger.info("Skills Platform | llm_stream_start | topic:#{pubsub_topic} | ok",
-      feature: "Skills Platform",
-      step: "llm_stream_start",
-      cid: pubsub_topic
-    )
+  @doc """
+  Starts an async streaming text generation task.
+
+  Dispatches `{:llm_token, chunk}` messages during generation, followed by
+  `{:llm_done, %{output, cost_usd, model}}` on success or `{:llm_error, reason}` on failure.
+
+  ## Params
+    - `context` - `ReqLLM.Context` struct
+    - `model` - model identifier string
+    - `opts` - keyword options; `:caller` (pid) required
+  """
+  @spec stream(term(), String.t(), keyword()) :: :ok
+  def stream(context, model, opts) do
+    caller = Keyword.fetch!(opts, :caller)
 
     Task.Supervisor.start_child(Elder.LLM.TaskSupervisor, fn ->
-      run_stream(context, model, pubsub_topic)
+      run_stream(context, model, caller)
     end)
 
     :ok
   end
 
-  @doc "Runs a non-streaming LLM request asynchronously, broadcasting `{:interview_done, result}` to the topic."
-  @spec call(term(), String.t(), String.t()) :: :ok
-  def call(context, model, pubsub_topic) do
-    Logger.info("Skills Platform | llm_interview_start | topic:#{pubsub_topic} | ok",
-      feature: "Skills Platform",
-      step: "llm_interview_start",
-      cid: pubsub_topic
-    )
+  @doc """
+  Starts an async non-streaming text generation task.
+
+  Dispatches `{:interview_done, {:ok, text}}` or `{:interview_done, {:error, reason}}`
+  to `caller` on completion.
+
+  ## Params
+    - `context` - `ReqLLM.Context` struct
+    - `model` - model identifier string
+    - `opts` - keyword options; `:caller` (pid) required
+  """
+  @spec call(term(), String.t(), keyword()) :: :ok
+  def call(context, model, opts) do
+    caller = Keyword.fetch!(opts, :caller)
 
     Task.Supervisor.start_child(Elder.LLM.TaskSupervisor, fn ->
       result =
         case ReqLLM.generate_text(model, context) do
           {:ok, response} ->
-            Logger.info("Skills Platform | llm_interview_done | topic:#{pubsub_topic} | ok",
-              feature: "Skills Platform",
-              step: "llm_interview_done",
-              cid: pubsub_topic
-            )
-
             {:ok, ReqLLM.Response.text(response)}
 
           {:error, reason} ->
-            Logger.error(
-              "Skills Platform | llm_interview | topic:#{pubsub_topic} | error:call",
-              feature: "Skills Platform",
-              step: "llm_interview",
-              cid: pubsub_topic,
-              reason: :call_error
-            )
-
             {:error, reason}
         end
 
-      PubSub.broadcast(Elder.PubSub, pubsub_topic, {:interview_done, result})
+      case result do
+        {:ok, _} ->
+          Logger.info("LLM Client | call_complete | model:#{model} | ok",
+            feature: "LLM Client",
+            step: "call_complete",
+            cid: model
+          )
+
+        {:error, _reason} ->
+          Logger.error("LLM Client | call_error | model:#{model} | error:call",
+            feature: "LLM Client",
+            step: "call_error",
+            cid: model
+          )
+      end
+
+      send(caller, {:interview_done, result})
     end)
 
     :ok
   end
 
-  @doc "Runs a structured object generation request asynchronously, broadcasting `{:llm_object_done, result}` to the topic."
-  @spec generate_object(term(), map(), String.t(), String.t()) :: :ok
-  def generate_object(context, schema, model, pubsub_topic) do
-    Logger.info("Skills Platform | llm_object_start | topic:#{pubsub_topic} | ok",
-      feature: "Skills Platform",
-      step: "llm_object_start",
-      cid: pubsub_topic
-    )
+  @doc """
+  Starts an async structured object generation task.
+
+  Dispatches `{:llm_object_done, {:ok, %{object: map(), cost_usd: float(), model: String.t()}}}`
+  or `{:llm_object_done, {:error, reason}}` to `caller` on completion.
+
+  ## Params
+    - `context` - `ReqLLM.Context` struct
+    - `schema` - JSON Schema map defining the expected response shape
+    - `model` - model identifier string
+    - `opts` - keyword options; `:caller` (pid) required
+  """
+  @spec generate_object(term(), map(), String.t(), keyword()) :: :ok
+  def generate_object(context, schema, model, opts) do
+    caller = Keyword.fetch!(opts, :caller)
 
     Task.Supervisor.start_child(Elder.LLM.TaskSupervisor, fn ->
       result =
@@ -81,13 +100,6 @@ defmodule Elder.LLM.Client do
           {:ok, response} ->
             usage = ReqLLM.Response.usage(response) || %{}
             cost = Map.get(usage, :total_cost, 0.0)
-
-            Logger.info(
-              "Skills Platform | llm_object_done | topic:#{pubsub_topic} | ok",
-              feature: "Skills Platform",
-              step: "llm_object_done",
-              cid: pubsub_topic
-            )
 
             {:ok,
              %{
@@ -97,45 +109,54 @@ defmodule Elder.LLM.Client do
              }}
 
           {:error, reason} ->
-            Logger.error(
-              "Skills Platform | llm_object | topic:#{pubsub_topic} | error:generate",
-              feature: "Skills Platform",
-              step: "llm_object",
-              cid: pubsub_topic,
-              reason: :generate_error
-            )
-
             {:error, reason}
         end
 
-      PubSub.broadcast(Elder.PubSub, pubsub_topic, {:llm_object_done, result})
+      case result do
+        {:ok, %{cost_usd: cost}} ->
+          Logger.info(
+            "LLM Client | generate_object_complete | model:#{model} | ok cost_usd:#{cost}",
+            feature: "LLM Client",
+            step: "generate_object_complete",
+            cid: model
+          )
+
+        {:error, _reason} ->
+          Logger.error(
+            "LLM Client | generate_object_error | model:#{model} | error:generate",
+            feature: "LLM Client",
+            step: "generate_object_error",
+            cid: model
+          )
+      end
+
+      send(caller, {:llm_object_done, result})
     end)
 
     :ok
   end
 
-  defp run_stream(context, model, pubsub_topic) do
+  defp run_stream(context, model, caller) do
     case ReqLLM.stream_text(model, context) do
       {:ok, stream_response} ->
-        handle_stream(stream_response, model, pubsub_topic)
+        handle_stream(stream_response, model, caller)
 
       {:error, reason} ->
-        Logger.error("Skills Platform | llm_stream | topic:#{pubsub_topic} | error:stream",
-          feature: "Skills Platform",
-          step: "llm_stream",
-          cid: pubsub_topic,
-          reason: :stream_error
+        Logger.error("LLM Client | stream_error | model:#{model} | error:stream",
+          feature: "LLM Client",
+          step: "stream_error",
+          cid: model
         )
 
-        PubSub.broadcast(Elder.PubSub, pubsub_topic, {:llm_error, reason})
+        send(caller, {:llm_error, reason})
     end
   end
 
-  defp handle_stream(stream_response, model, pubsub_topic) do
+  defp handle_stream(stream_response, model, caller) do
     result =
       ReqLLM.StreamResponse.process_stream(stream_response,
         on_result: fn chunk ->
-          PubSub.broadcast(Elder.PubSub, pubsub_topic, {:llm_token, chunk})
+          send(caller, {:llm_token, chunk})
         end
       )
 
@@ -145,14 +166,13 @@ defmodule Elder.LLM.Client do
         cost = Map.get(usage, :total_cost, 0.0)
 
         Logger.info(
-          "Skills Platform | llm_stream_done | topic:#{pubsub_topic} | ok",
-          feature: "Skills Platform",
-          step: "llm_stream_done",
-          cid: pubsub_topic,
-          ms: cost
+          "LLM Client | stream_complete | model:#{model} | ok cost_usd:#{cost}",
+          feature: "LLM Client",
+          step: "stream_complete",
+          cid: model
         )
 
-        PubSub.broadcast(Elder.PubSub, pubsub_topic, {
+        send(caller, {
           :llm_done,
           %{
             output: ReqLLM.Response.text(response),
@@ -162,15 +182,13 @@ defmodule Elder.LLM.Client do
         })
 
       {:error, reason} ->
-        Logger.error(
-          "Skills Platform | llm_stream_process | topic:#{pubsub_topic} | error:process",
-          feature: "Skills Platform",
-          step: "llm_stream_process",
-          cid: pubsub_topic,
-          reason: :process_error
+        Logger.error("LLM Client | stream_error | model:#{model} | error:process",
+          feature: "LLM Client",
+          step: "stream_error",
+          cid: model
         )
 
-        PubSub.broadcast(Elder.PubSub, pubsub_topic, {:llm_error, reason})
+        send(caller, {:llm_error, reason})
     end
   end
 end
