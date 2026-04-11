@@ -11,6 +11,7 @@ defmodule ElderWeb.SkillRunLiveTest do
     stub(Elder.LLM.ClientMock, :stream, fn _context, _model, _topic -> :ok end)
     stub(Elder.LLM.ClientMock, :call, fn _context, _model, _topic -> :ok end)
     stub(Elder.LLM.ClientMock, :generate_object, fn _context, _schema, _model, _topic -> :ok end)
+    stub(Elder.Asana.ClientMock, :list_workspaces, fn -> {:ok, []} end)
     :ok
   end
 
