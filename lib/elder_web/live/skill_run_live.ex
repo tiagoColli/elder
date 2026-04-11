@@ -15,7 +15,9 @@ defmodule ElderWeb.SkillRunLive do
   @compile {:no_warn_undefined, Elder.Asana}
 
   alias Elder.Asana
+  alias Elder.Asana.Artifacts.Draft
   alias Elder.Asana.TaskDraft
+  alias Elder.Chat.Conversation
   alias Elder.LLM
   alias Elder.LLM.InterviewResponse
   alias Elder.LLM.InterviewResponseDraft
@@ -51,7 +53,7 @@ defmodule ElderWeb.SkillRunLive do
         asana_task_url: nil,
         error: nil,
         token_count: 0,
-        conversation: [],
+        chat: nil,
         chat_loading: false,
         workspaces: [],
         projects: [],
@@ -65,17 +67,7 @@ defmodule ElderWeb.SkillRunLive do
 
     if connected?(socket) do
       lv_pid = self()
-
-      Task.start(fn ->
-        result =
-          try do
-            Asana.list_workspaces()
-          rescue
-            e -> {:error, {:exception, e}}
-          end
-
-        send(lv_pid, {:asana_workspaces_loaded, result})
-      end)
+      Task.start(fn -> send(lv_pid, {:asana_workspaces_loaded, Asana.list_workspaces()}) end)
     end
 
     {:ok, socket}
@@ -139,8 +131,16 @@ defmodule ElderWeb.SkillRunLive do
         {:noreply, socket}
 
       {review_skill, _format} ->
-        conversation = [%{role: :user, text: input}]
-        :ok = LLM.interview_run(review_skill, conversation, topic)
+        {:ok, chat} =
+          Conversation.new(
+            context: %{
+              user_name: socket.assigns.current_user.name,
+              skill_slug: socket.assigns.skill.slug
+            }
+          )
+
+        {:ok, chat} = Conversation.add_user_message(chat, input)
+        :ok = LLM.interview_run(review_skill, Conversation.to_llm_messages(chat), topic)
 
         Logger.info(
           "Skills Platform | skill_run_start | skill:#{socket.assigns.skill.slug} | interview",
@@ -152,7 +152,7 @@ defmodule ElderWeb.SkillRunLive do
         socket =
           assign(socket,
             phase: :chatting,
-            conversation: conversation,
+            chat: chat,
             chat_loading: true,
             error: nil,
             task_draft: nil
@@ -193,16 +193,7 @@ defmodule ElderWeb.SkillRunLive do
   def handle_event("select_workspace", %{"workspace_gid" => gid}, socket) do
     lv_pid = self()
 
-    Task.start(fn ->
-      result =
-        try do
-          Asana.list_projects(gid)
-        rescue
-          e -> {:error, {:exception, e}}
-        end
-
-      send(lv_pid, {:asana_projects_loaded, result})
-    end)
+    Task.start(fn -> send(lv_pid, {:asana_projects_loaded, Asana.list_projects(gid)}) end)
 
     socket =
       assign(socket,
@@ -220,16 +211,7 @@ defmodule ElderWeb.SkillRunLive do
   def handle_event("select_project", %{"project_gid" => gid}, socket) do
     lv_pid = self()
 
-    Task.start(fn ->
-      result =
-        try do
-          Asana.list_sections(gid)
-        rescue
-          e -> {:error, {:exception, e}}
-        end
-
-      send(lv_pid, {:asana_sections_loaded, result})
-    end)
+    Task.start(fn -> send(lv_pid, {:asana_sections_loaded, Asana.list_sections(gid)}) end)
 
     socket =
       assign(socket,
@@ -260,14 +242,10 @@ defmodule ElderWeb.SkillRunLive do
 
     Task.start(fn ->
       result =
-        try do
-          if task_draft do
-            Asana.create_task_from_draft(task_draft, target)
-          else
-            Asana.create_task(skill_run, target)
-          end
-        rescue
-          e -> {:error, {:exception, e}}
+        if task_draft do
+          Asana.create_task_from_draft(task_draft, target)
+        else
+          Asana.create_task(skill_run, target)
         end
 
       send(lv_pid, {:asana_result, result})
@@ -291,7 +269,7 @@ defmodule ElderWeb.SkillRunLive do
         asana_task_url: nil,
         error: nil,
         token_count: 0,
-        conversation: [],
+        chat: nil,
         chat_loading: false,
         projects: [],
         sections: [],
@@ -366,87 +344,30 @@ defmodule ElderWeb.SkillRunLive do
   end
 
   def handle_info({:llm_object_done, {:ok, %{object: raw, cost_usd: cost, model: model}}}, socket) do
-    case TaskDraft.from_map(raw) do
-      {:ok, draft} ->
-        case Jason.encode(Map.from_struct(draft)) do
-          {:ok, encoded} ->
-            attrs = %{
-              skill_slug: socket.assigns.skill.slug,
-              user_id: socket.assigns.current_user.id,
-              user_input: socket.assigns.user_input,
-              llm_output: encoded,
-              model: model,
-              cost_usd: cost,
-              status: :done
-            }
-
-            case Skills.save_run(attrs) do
-              {:ok, skill_run} ->
-                Logger.info(
-                  "Skills Platform | skill_run_save | skill:#{attrs.skill_slug} | ok",
-                  feature: "Skills Platform",
-                  step: "skill_run_save",
-                  cid: socket.id
-                )
-
-                socket =
-                  assign(socket,
-                    skill_run: skill_run,
-                    phase: :previewing,
-                    task_draft: draft,
-                    llm_cost: cost
-                  )
-
-                {:noreply, socket}
-
-              {:error, _changeset} ->
-                Logger.error(
-                  "Skills Platform | skill_run_save | skill:#{attrs.skill_slug} | error:changeset",
-                  feature: "Skills Platform",
-                  step: "skill_run_save",
-                  cid: socket.id,
-                  reason: :changeset_error
-                )
-
-                {:noreply,
-                 assign(socket, phase: :idle, error: "Failed to save result. Please try again.")}
-            end
-
-          {:error, reason} ->
-            Logger.warning(
-              "Skills Platform | task_draft_encode | skill:#{socket.assigns.skill.slug} | error:json",
-              feature: "Skills Platform",
-              step: "task_draft_encode",
-              cid: socket.id,
-              reason: reason
-            )
-
-            {:noreply,
-             assign(socket, phase: :idle, error: "Failed to process result. Please try again.")}
-        end
-
-      {:error, _reason} ->
-        Logger.warning(
-          "Skills Platform | task_draft_parse | skill:#{socket.assigns.skill.slug} | error:invalid",
-          feature: "Skills Platform",
-          step: "task_draft_parse",
-          cid: socket.id,
-          reason: :invalid_task_draft
-        )
-
-        {:noreply,
-         assign(socket,
-           phase: :idle,
-           error: "Could not parse the generated task. Please try again."
-         )}
-    end
+    {:noreply, persist_structured_run(socket, raw, cost, model)}
   end
 
   def handle_info({:llm_object_done, {:error, reason}}, socket) do
+    Logger.error(
+      "Skills Platform | llm_error | skill:#{socket.assigns.skill.slug} | error:structured",
+      feature: "Skills Platform",
+      step: "llm_error",
+      cid: socket.id,
+      reason: :structured_llm_error
+    )
+
     {:noreply, assign(socket, phase: :idle, error: format_llm_error(reason))}
   end
 
   def handle_info({:llm_error, reason}, socket) do
+    Logger.error(
+      "Skills Platform | llm_error | skill:#{socket.assigns.skill.slug} | error:llm",
+      feature: "Skills Platform",
+      step: "llm_error",
+      cid: socket.id,
+      reason: :llm_error
+    )
+
     socket =
       socket
       |> assign(phase: :idle, error: format_llm_error(reason))
@@ -471,22 +392,35 @@ defmodule ElderWeb.SkillRunLive do
         end
 
       {:ok, %{status: :continue} = p} ->
-        msg = %{
-          role: :assistant,
-          text: p.assistant_message,
-          question: p.question,
-          draft: p.draft,
-          suggestions: p.suggestions
-        }
+        draft = build_asana_draft(p.draft)
 
-        conversation = append_conversation_message(socket.assigns.conversation, msg)
+        {:ok, chat} =
+          Conversation.add_assistant_message(socket.assigns.chat, p.assistant_message,
+            question: p.question,
+            suggestions: p.suggestions,
+            artifacts: [draft]
+          )
 
-        {:noreply, assign(socket, conversation: conversation, chat_loading: false, error: nil)}
+        {:noreply, assign(socket, chat: chat, chat_loading: false, error: nil)}
 
       {:error, _parse_error} ->
         if String.trim(text) == "[READY]" do
+          Logger.info(
+            "Skills Platform | interview_parse | skill:#{socket.assigns.skill.slug} | ready_token",
+            feature: "Skills Platform",
+            step: "interview_parse",
+            cid: socket.id
+          )
+
           {:noreply, interview_finish_to_streaming(socket)}
         else
+          Logger.warning(
+            "Skills Platform | interview_parse | skill:#{socket.assigns.skill.slug} | error:parse",
+            feature: "Skills Platform",
+            step: "interview_parse",
+            cid: socket.id
+          )
+
           {:noreply,
            assign(socket,
              chat_loading: false,
@@ -497,6 +431,14 @@ defmodule ElderWeb.SkillRunLive do
   end
 
   def handle_info({:interview_done, {:error, reason}}, socket) do
+    Logger.error(
+      "Skills Platform | interview_error | skill:#{socket.assigns.skill.slug} | error:llm",
+      feature: "Skills Platform",
+      step: "interview_error",
+      cid: socket.id,
+      reason: :interview_llm_error
+    )
+
     {:noreply, assign(socket, chat_loading: false, error: format_llm_error(reason))}
   end
 
@@ -525,17 +467,103 @@ defmodule ElderWeb.SkillRunLive do
   end
 
   def handle_info({:asana_result, {:ok, %{task_url: url}}}, socket) do
+    Logger.info(
+      "Skills Platform | asana_send | skill:#{socket.assigns.skill.slug} | ok",
+      feature: "Skills Platform",
+      step: "asana_send",
+      cid: socket.id
+    )
+
     {:noreply, assign(socket, phase: :asana_success, asana_task_url: url)}
   end
 
   def handle_info({:asana_result, {:error, reason}}, socket) do
+    Logger.error(
+      "Skills Platform | asana_send | skill:#{socket.assigns.skill.slug} | error:asana",
+      feature: "Skills Platform",
+      step: "asana_send",
+      cid: socket.id,
+      reason: :asana_error
+    )
+
     recovery_phase = if socket.assigns.task_draft, do: :previewing, else: :done
 
     {:noreply,
      assign(socket,
        phase: recovery_phase,
-       error: "Could not create Asana task: #{inspect(reason)}"
+       error: "Could not create Asana task: #{format_asana_error(reason)}"
      )}
+  end
+
+  defp format_asana_error({:asana_api_error, status, _detail}) when is_integer(status),
+    do: "Asana returned an error (HTTP #{status}). Please try again."
+
+  defp format_asana_error({:network_error, _reason}),
+    do: "Network error contacting Asana. Please try again."
+
+  defp format_asana_error(_unknown),
+    do: "An unexpected error occurred. Please try again."
+
+  defp persist_structured_run(socket, raw, cost, model) do
+    slug = socket.assigns.skill.slug
+
+    with {:parse, {:ok, draft}} <- {:parse, TaskDraft.from_map(raw)},
+         {:encode, {:ok, encoded}} <- {:encode, Jason.encode(Map.from_struct(draft))},
+         attrs = %{
+           skill_slug: slug,
+           user_id: socket.assigns.current_user.id,
+           user_input: socket.assigns.user_input,
+           llm_output: encoded,
+           model: model,
+           cost_usd: cost,
+           status: :done
+         },
+         {:save, {:ok, skill_run}} <- {:save, Skills.save_run(attrs)} do
+      Logger.info(
+        "Skills Platform | skill_run_save | skill:#{slug} | ok",
+        feature: "Skills Platform",
+        step: "skill_run_save",
+        cid: socket.id
+      )
+
+      assign(socket, skill_run: skill_run, phase: :previewing, task_draft: draft, llm_cost: cost)
+    else
+      {:parse, {:error, _reason}} ->
+        Logger.warning(
+          "Skills Platform | task_draft_parse | skill:#{slug} | error:invalid",
+          feature: "Skills Platform",
+          step: "task_draft_parse",
+          cid: socket.id,
+          reason: :invalid_task_draft
+        )
+
+        assign(socket,
+          phase: :idle,
+          error: "Could not parse the generated task. Please try again."
+        )
+
+      {:encode, {:error, reason}} ->
+        Logger.warning(
+          "Skills Platform | task_draft_encode | skill:#{slug} | error:json",
+          feature: "Skills Platform",
+          step: "task_draft_encode",
+          cid: socket.id,
+          reason: reason
+        )
+
+        assign(socket, phase: :idle, error: "Failed to process result. Please try again.")
+
+      {:save, {:error, _changeset}} ->
+        Logger.error(
+          "Skills Platform | skill_run_save | skill:#{slug} | error:changeset",
+          feature: "Skills Platform",
+          step: "skill_run_save",
+          cid: socket.id,
+          reason: :changeset_error
+        )
+
+        assign(socket, phase: :idle, error: "Failed to save result. Please try again.")
+    end
   end
 
   defp format_llm_error(%{status: status}) when status in [503, 429] do
@@ -555,22 +583,27 @@ defmodule ElderWeb.SkillRunLive do
   end
 
   defp interview_user_message(socket, text) do
-    topic = "skill_run:#{socket.id}"
+    case Conversation.add_user_message(socket.assigns.chat, text) do
+      {:ok, chat} ->
+        topic = "skill_run:#{socket.id}"
 
-    conversation =
-      append_conversation_message(socket.assigns.conversation, %{role: :user, text: text})
+        :ok =
+          LLM.interview_run(
+            socket.assigns.review_skill,
+            Conversation.to_llm_messages(chat),
+            topic
+          )
 
-    :ok = LLM.interview_run(socket.assigns.review_skill, conversation, topic)
-    assign(socket, conversation: conversation, chat_loading: true, error: nil)
-  end
+        assign(socket, chat: chat, chat_loading: true, error: nil)
 
-  defp append_conversation_message(conversation, message) do
-    Enum.reverse([message | Enum.reverse(conversation)])
+      {:error, reason} ->
+        assign(socket, error: "Could not send message (#{reason}). Please try again.")
+    end
   end
 
   defp sanitize_llm_output(html) do
     html
-    |> String.replace(~r/<body>/i, "")
+    |> String.replace(~r/<body[^>]*>/i, "")
     |> String.replace(~r/<\/body>/i, "")
     |> HtmlSanitizeEx.basic_html()
   end
@@ -656,42 +689,73 @@ defmodule ElderWeb.SkillRunLive do
   end
 
   defp interview_finish_to_streaming(socket) do
-    topic = "skill_run:#{socket.id}"
-    transcript = build_transcript(socket.assigns.conversation)
-    :ok = LLM.stream_run(socket.assigns.skill, transcript, topic)
+    Logger.info(
+      "Skills Platform | interview_complete | skill:#{socket.assigns.skill.slug} | streaming",
+      feature: "Skills Platform",
+      step: "interview_complete",
+      cid: socket.id
+    )
 
-    socket =
-      socket
-      |> assign(
-        phase: :streaming,
-        user_input: transcript,
-        error: nil,
-        token_count: 0,
-        chat_loading: false
-      )
-      |> stream(:tokens, [], reset: true)
+    case Conversation.complete(socket.assigns.chat) do
+      {:ok, chat} ->
+        topic = "skill_run:#{socket.id}"
+        transcript = Conversation.to_transcript(chat)
+        :ok = LLM.stream_run(socket.assigns.skill, transcript, topic)
 
-    socket
+        socket
+        |> assign(
+          phase: :streaming,
+          chat: chat,
+          user_input: transcript,
+          error: nil,
+          token_count: 0,
+          chat_loading: false
+        )
+        |> stream(:tokens, [], reset: true)
+
+      {:error, _reason} ->
+        assign(socket,
+          chat_loading: false,
+          error: "Could not finalize conversation. Please try again."
+        )
+    end
   end
 
   defp interview_finish_to_structured(socket) do
-    topic = "skill_run:#{socket.id}"
-    transcript = build_transcript(socket.assigns.conversation)
-    user_name = socket.assigns.current_user.name
-
-    :ok =
-      LLM.structured_run(socket.assigns.skill, transcript, TaskDraft.schema(), topic,
-        user_name: user_name
-      )
-
-    socket
-    |> assign(
-      phase: :processing,
-      user_input: transcript,
-      error: nil,
-      chat_loading: false
+    Logger.info(
+      "Skills Platform | interview_complete | skill:#{socket.assigns.skill.slug} | structured",
+      feature: "Skills Platform",
+      step: "interview_complete",
+      cid: socket.id
     )
-    |> stream(:tokens, [], reset: true)
+
+    case Conversation.complete(socket.assigns.chat) do
+      {:ok, chat} ->
+        topic = "skill_run:#{socket.id}"
+        transcript = Conversation.to_transcript(chat)
+        user_name = socket.assigns.current_user.name
+
+        :ok =
+          LLM.structured_run(socket.assigns.skill, transcript, TaskDraft.schema(), topic,
+            user_name: user_name
+          )
+
+        socket
+        |> assign(
+          phase: :processing,
+          chat: chat,
+          user_input: transcript,
+          error: nil,
+          chat_loading: false
+        )
+        |> stream(:tokens, [], reset: true)
+
+      {:error, _reason} ->
+        assign(socket,
+          chat_loading: false,
+          error: "Could not finalize conversation. Please try again."
+        )
+    end
   end
 
   defp required_interview_fields_present?(%InterviewResponseDraft{} = draft) do
@@ -710,74 +774,35 @@ defmodule ElderWeb.SkillRunLive do
       end)
       |> Enum.map_join(", ", &to_string/1)
 
-    msg = %{
-      role: :assistant,
-      text: "Before we can generate the task, I still need: #{missing}. Could you provide those?",
-      question: nil,
-      draft: draft,
-      suggestions: []
+    asana_draft = build_asana_draft(draft)
+
+    {:ok, chat} =
+      Conversation.add_assistant_message(
+        socket.assigns.chat,
+        "Before we can generate the task, I still need: #{missing}. Could you provide those?",
+        artifacts: [asana_draft]
+      )
+
+    assign(socket, chat: chat, chat_loading: false)
+  end
+
+  defp build_asana_draft(%InterviewResponseDraft{} = d) do
+    %Draft{
+      name: d.name,
+      description: d.description,
+      responsible_email: d.responsible_email,
+      due_on: d.due_on,
+      skipped_fields: d.skipped_fields
     }
-
-    conversation = append_conversation_message(socket.assigns.conversation, msg)
-    assign(socket, conversation: conversation, chat_loading: false)
   end
 
-  defp build_transcript(conversation) do
-    Enum.map_join(conversation, "\n\n", fn
-      %{role: :user, text: text} ->
-        "User: #{text}"
-
-      %{role: :assistant, text: text} = msg ->
-        base = "Assistant: #{text}"
-
-        base =
-          case Map.get(msg, :question) do
-            q when is_binary(q) and q != "" -> base <> "\nQuestion: #{q}"
-            _no_question -> base
-          end
-
-        case msg do
-          %{draft: %InterviewResponseDraft{} = d} ->
-            case draft_transcript_line(d) do
-              nil -> base
-              line -> base <> "\n" <> line
-            end
-
-          _no_draft ->
-            base
-        end
-    end)
+  defp has_draft_artifact?(%{artifacts: artifacts}) do
+    Enum.any?(artifacts, &is_struct(&1, Draft))
   end
 
-  defp draft_transcript_line(%InterviewResponseDraft{} = d) do
-    parts =
-      [
-        {:name, d.name},
-        {:responsible_email, d.responsible_email},
-        {:description, d.description},
-        {:due_on, d.due_on}
-      ]
-      |> Enum.filter(fn {_key, v} -> present_draft_value?(v) end)
-      |> Enum.map(fn {k, v} -> "#{k}: #{v}" end)
-      |> then(fn base ->
-        case d.skipped_fields do
-          [] ->
-            base
-
-          fields ->
-            item = "skipped_fields: " <> Enum.join(fields, ", ")
-            Enum.reverse([item | Enum.reverse(base)])
-        end
-      end)
-
-    case parts do
-      [] -> nil
-      _non_empty -> "Draft — " <> Enum.join(parts, " | ")
-    end
+  defp get_draft_artifact(%{artifacts: artifacts}) do
+    Enum.find(artifacts, &is_struct(&1, Draft))
   end
-
-  defp present_draft_value?(v) when v in [nil, ""], do: false
-  defp present_draft_value?(_present), do: true
 
   defp format_draft_cell(value) when value in [nil, ""], do: "—"
   defp format_draft_cell(value) when is_binary(value), do: value
@@ -833,7 +858,7 @@ defmodule ElderWeb.SkillRunLive do
       <div :if={@phase == :chatting}>
         <div class="space-y-5 mb-8">
           <div
-            :for={msg <- @conversation}
+            :for={msg <- Conversation.messages(@chat)}
             class={[
               "flex w-full",
               if(msg.role == :user, do: "justify-end", else: "justify-start")
@@ -849,7 +874,7 @@ defmodule ElderWeb.SkillRunLive do
             <div
               :if={
                 msg.role == :assistant &&
-                  not is_struct(Map.get(msg, :draft), InterviewResponseDraft)
+                  not has_draft_artifact?(msg)
               }
               class="max-w-[85%] sm:max-w-prose rounded-2xl bg-surface-raised px-4 py-2.5 text-sm text-primary shadow-sm leading-relaxed"
             >
@@ -859,7 +884,7 @@ defmodule ElderWeb.SkillRunLive do
             <div
               :if={
                 msg.role == :assistant &&
-                  is_struct(Map.get(msg, :draft), InterviewResponseDraft)
+                  has_draft_artifact?(msg)
               }
               class="w-full max-w-xl rounded-xl border border-base-border bg-surface-raised shadow-md"
             >
@@ -874,8 +899,8 @@ defmodule ElderWeb.SkillRunLive do
 
                 <div
                   :if={
-                    is_binary(Map.get(msg, :question)) &&
-                      String.trim(Map.get(msg, :question)) != ""
+                    is_binary(msg.question) &&
+                      String.trim(msg.question) != ""
                   }
                   class="rounded-lg border border-accent/20 bg-accent/10 px-3 py-2.5"
                   data-testid="interview-question"
@@ -885,7 +910,7 @@ defmodule ElderWeb.SkillRunLive do
                   </p>
 
                   <p class="mt-1 text-sm font-medium text-primary leading-snug">
-                    {Map.get(msg, :question)}
+                    {msg.question}
                   </p>
                 </div>
 
@@ -898,7 +923,7 @@ defmodule ElderWeb.SkillRunLive do
                   </dt>
 
                   <dd class="text-primary leading-snug break-words">
-                    {format_draft_cell(msg.draft.name)}
+                    {format_draft_cell(get_draft_artifact(msg).name)}
                   </dd>
 
                   <dt class="text-xs font-medium uppercase tracking-wide text-muted sm:pt-0.5">
@@ -906,7 +931,7 @@ defmodule ElderWeb.SkillRunLive do
                   </dt>
 
                   <dd class="text-primary leading-snug break-words">
-                    {format_draft_cell(msg.draft.responsible_email)}
+                    {format_draft_cell(get_draft_artifact(msg).responsible_email)}
                   </dd>
 
                   <dt class="text-xs font-medium uppercase tracking-wide text-muted sm:pt-0.5">
@@ -914,7 +939,7 @@ defmodule ElderWeb.SkillRunLive do
                   </dt>
 
                   <dd class="text-primary leading-snug break-words">
-                    {format_draft_cell(msg.draft.description)}
+                    {format_draft_cell(get_draft_artifact(msg).description)}
                   </dd>
 
                   <dt class="text-xs font-medium uppercase tracking-wide text-muted sm:pt-0.5">
@@ -922,7 +947,7 @@ defmodule ElderWeb.SkillRunLive do
                   </dt>
 
                   <dd class="text-primary leading-snug break-words">
-                    {format_draft_cell(msg.draft.due_on)}
+                    {format_draft_cell(get_draft_artifact(msg).due_on)}
                   </dd>
 
                   <dt class="text-xs font-medium uppercase tracking-wide text-muted sm:pt-0.5">
@@ -930,17 +955,17 @@ defmodule ElderWeb.SkillRunLive do
                   </dt>
 
                   <dd class="text-primary leading-snug break-words">
-                    {format_skipped_fields_cell(msg.draft.skipped_fields)}
+                    {format_skipped_fields_cell(get_draft_artifact(msg).skipped_fields)}
                   </dd>
                 </dl>
               </div>
 
               <div
-                :if={Map.get(msg, :suggestions, []) != []}
+                :if={msg.suggestions != []}
                 class="flex flex-wrap gap-2 border-t border-raised-border bg-surface/50 px-4 py-3"
               >
                 <button
-                  :for={s <- Map.get(msg, :suggestions, [])}
+                  :for={s <- msg.suggestions}
                   type="button"
                   phx-click="pick_suggestion"
                   phx-value-message={s.value}
