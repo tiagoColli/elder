@@ -110,6 +110,26 @@ defmodule ElderWeb.SkillRunLiveTest do
       assert html =~ "Could not create Asana task"
     end
 
+    test "asana_result API error includes HTTP status code in message", %{conn: conn} do
+      user = insert(:user)
+      {:ok, view, _html} = live(authed_conn(conn, user), ~p"/skills/create-asana-task/run")
+
+      send(view.pid, {:asana_result, {:error, {:asana_api_error, 403, "Forbidden"}}})
+
+      html = render(view)
+      assert html =~ "HTTP 403"
+    end
+
+    test "asana_result network error shows network error message", %{conn: conn} do
+      user = insert(:user)
+      {:ok, view, _html} = live(authed_conn(conn, user), ~p"/skills/create-asana-task/run")
+
+      send(view.pid, {:asana_result, {:error, {:network_error, :econnrefused}}})
+
+      html = render(view)
+      assert html =~ "Network error"
+    end
+
     test "asana_workspaces_loaded error shows error message", %{conn: conn} do
       user = insert(:user)
       {:ok, view, _html} = live(authed_conn(conn, user), ~p"/skills/create-asana-task/run")
@@ -250,6 +270,15 @@ defmodule ElderWeb.SkillRunLiveTest do
 
       html = render(view)
       assert html =~ "Could not load Asana projects"
+    end
+
+    test "asana_sections_loaded success stores sections without error", %{conn: conn} do
+      user = insert(:user)
+      {:ok, view, _html} = live(authed_conn(conn, user), ~p"/skills/create-asana-task/run")
+
+      send(view.pid, {:asana_sections_loaded, {:ok, [%{gid: "sec-1", name: "In Progress"}]}})
+
+      refute render(view) =~ "Could not load Asana sections"
     end
 
     test "asana_sections_loaded error shows error message", %{conn: conn} do
@@ -443,6 +472,34 @@ defmodule ElderWeb.SkillRunLiveTest do
       |> render_click()
 
       assert render(view) =~ "Thinking"
+    end
+  end
+
+  describe "handle_event generate (streaming path)" do
+    test "transitions to :streaming phase for a skill with streaming output format", %{conn: conn} do
+      user = insert(:user)
+      {:ok, view, _html} = live(authed_conn(conn, user), ~p"/skills/create-asana-task-review/run")
+
+      view
+      |> element("form")
+      |> render_submit(%{"user_input" => "Write a handover brief for the backend team"})
+
+      assert render(view) =~ "Generating..."
+    end
+  end
+
+  describe "handle_info llm_token" do
+    test "renders streaming token in the output area", %{conn: conn} do
+      user = insert(:user)
+      {:ok, view, _html} = live(authed_conn(conn, user), ~p"/skills/create-asana-task-review/run")
+
+      view
+      |> element("form")
+      |> render_submit(%{"user_input" => "Write a brief"})
+
+      send(view.pid, {:llm_token, "Backend handover"})
+
+      assert render(view) =~ "Backend handover"
     end
   end
 
