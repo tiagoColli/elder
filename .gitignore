@@ -41,3 +41,6 @@ elder-*.tar
 /priv/static/cache_manifest.json
 /priv/static/*.gz
 /priv/static/robots-*.txt
+
+/.cursor/
+/.claude/

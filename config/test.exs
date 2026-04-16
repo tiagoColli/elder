@@ -27,4 +27,10 @@ config :phoenix_live_view,
 
 config :elder, :asana_client, Elder.Asana.ClientMock
 
-config :elder, :llm_client, Elder.LLM.ClientMock
+config :elder, Elder.Interview, dispatch_enabled: false
+
+config :elder, Elder.LLM, model: "mock-model"
+
+config :ex_llm,
+  default_provider: :mock,
+  cost_tracking_enabled: false

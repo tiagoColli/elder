@@ -10,7 +10,9 @@ if config_env() in [:prod, :dev] do
     client_secret: System.get_env("GOOGLE_CLIENT_SECRET") || ""
 end
 
-config :elder, Elder.LLM, model: System.get_env("LLM_MODEL", "google:gemini-2.5-flash")
+if config_env() != :test do
+  config :elder, Elder.LLM, model: System.get_env("LLM_MODEL", "google:gemini-2.5-flash")
+end
 
 if config_env() == :prod do
   database_url =
@@ -44,6 +46,15 @@ if config_env() == :prod do
 end
 
 if config_env() != :test do
+  # Bridge GOOGLE_API_KEY to GEMINI_API_KEY for ExLLM's Gemini provider.
+  # ExLLM reads GEMINI_API_KEY from env; Elder historically used GOOGLE_API_KEY.
+  # Remove once all deployments use GEMINI_API_KEY directly.
+  gemini_key = System.get_env("GEMINI_API_KEY") || System.get_env("GOOGLE_API_KEY")
+
+  if gemini_key do
+    System.put_env("GEMINI_API_KEY", gemini_key)
+  end
+
   config :elder, Elder.Asana,
     pat: System.fetch_env!("ASANA_PAT"),
     default_project_gid: System.get_env("ASANA_DEFAULT_PROJECT_GID"),

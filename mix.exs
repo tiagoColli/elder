@@ -66,7 +66,7 @@ defmodule Elder.MixProject do
       {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
       {:dialyxir, "~> 1.4", only: [:dev, :test], runtime: false},
       {:sobelow, "~> 0.13", only: [:dev, :test], runtime: false},
-      {:req_llm, "~> 1.9"},
+      {:ex_llm, "~> 0.8"},
       {:html_sanitize_ex, "~> 1.4"}
     ]
   end

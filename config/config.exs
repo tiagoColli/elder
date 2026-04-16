@@ -45,9 +45,11 @@ config :ueberauth, Ueberauth,
 
 config :phoenix, :json_library, Jason
 
-config :elder, Elder.LLM, model: "google:gemini-2.5-flash"
+config :ex_llm,
+  default_provider: :gemini,
+  cost_tracking_enabled: true
 
-config :elder, :llm_client, Elder.LLM.Client
+config :elder, Elder.LLM, model: "google:gemini-2.5-flash"
 
 config :elder, Elder.Asana,
   pat: nil,

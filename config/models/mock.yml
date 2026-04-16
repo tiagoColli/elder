@@ -1,0 +1,8 @@
+provider: mock
+default_model: mock-model
+models:
+  mock-model:
+    context_window: 4096
+    pricing:
+      input: 0
+      output: 0
