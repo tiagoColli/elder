@@ -8,11 +8,26 @@ defmodule ElderWeb.SkillRunLiveTest do
   setup :set_mox_global
 
   setup do
-    stub(Elder.LLM.ClientMock, :stream, fn _context, _model, _topic -> :ok end)
-    stub(Elder.LLM.ClientMock, :call, fn _context, _model, _topic -> :ok end)
-    stub(Elder.LLM.ClientMock, :generate_object, fn _context, _schema, _model, _topic -> :ok end)
     stub(Elder.Asana.ClientMock, :list_workspaces, fn -> {:ok, []} end)
     :ok
+  end
+
+  defp build_interview_response(attrs) do
+    defaults = %{
+      status: :continue,
+      assistant_message: "What should the task be called?",
+      question: "What should the task be called?",
+      suggestions: [],
+      draft: %Elder.Schemas.InterviewResponse.Draft{
+        name: nil,
+        description: nil,
+        due_on: nil,
+        responsible_email: nil,
+        skipped_fields: []
+      }
+    }
+
+    struct!(Elder.Schemas.InterviewResponse, Map.merge(defaults, attrs))
   end
 
   defp authed_conn(conn, user) do
@@ -316,11 +331,19 @@ defmodule ElderWeb.SkillRunLiveTest do
       |> element("form")
       |> render_submit(%{"user_input" => "Create a campaign brief for Q4 product launch"})
 
-      json = ~S"""
-      {"status":"ready","draft":{"name":"Q4 Product Launch","responsible_email":"owner@company.com","description":"Full campaign brief for the product launch.","due_on":"2026-06-01"},"skipped_fields":[],"assistant_message":"All set. Ready to generate."}
-      """
+      response =
+        build_interview_response(%{
+          status: :ready,
+          assistant_message: "All set. Ready to generate.",
+          draft: %Elder.Schemas.InterviewResponse.Draft{
+            name: "Q4 Product Launch",
+            responsible_email: "owner@company.com",
+            description: "Full campaign brief for the product launch.",
+            due_on: "2026-06-01"
+          }
+        })
 
-      send(view.pid, {:interview_done, {:ok, json}})
+      send(view.pid, {:interview_done, {:ok, response}})
 
       html = render(view)
       assert html =~ "Generating task"
@@ -336,11 +359,19 @@ defmodule ElderWeb.SkillRunLiveTest do
       |> element("form")
       |> render_submit(%{"user_input" => "Create a task without description"})
 
-      json = ~S"""
-      {"status":"ready","draft":{"name":"Task without description","responsible_email":null,"description":null,"due_on":null},"skipped_fields":[],"assistant_message":"Ready."}
-      """
+      response =
+        build_interview_response(%{
+          status: :ready,
+          assistant_message: "Ready.",
+          draft: %Elder.Schemas.InterviewResponse.Draft{
+            name: "Task without description",
+            responsible_email: nil,
+            description: nil,
+            due_on: nil
+          }
+        })
 
-      send(view.pid, {:interview_done, {:ok, json}})
+      send(view.pid, {:interview_done, {:ok, response}})
 
       html = render(view)
       assert html =~ "description"
@@ -361,6 +392,23 @@ defmodule ElderWeb.SkillRunLiveTest do
       assert html =~ "temporarily unavailable"
       refute html =~ "Thinking"
     end
+
+    test "interview_done with non-HTTP error shows generic message and clears loading", %{
+      conn: conn
+    } do
+      user = insert(:user)
+      {:ok, view, _html} = live(authed_conn(conn, user), ~p"/skills/create-asana-task/run")
+
+      view
+      |> element("form")
+      |> render_submit(%{"user_input" => "Brief"})
+
+      send(view.pid, {:interview_done, {:error, :instructor_max_retries}})
+
+      html = render(view)
+      assert html =~ "Generation failed"
+      refute html =~ "Thinking"
+    end
   end
 
   describe "handle_event chat_reply" do
@@ -372,11 +420,14 @@ defmodule ElderWeb.SkillRunLiveTest do
       |> element("form")
       |> render_submit(%{"user_input" => "I need a task about the annual report"})
 
-      json = ~S"""
-      {"status":"continue","draft":{"name":"Annual report task","responsible_email":null,"description":null,"due_on":null},"skipped_fields":[],"assistant_message":"Got the title.","question":"Can you describe this task?"}
-      """
+      response =
+        build_interview_response(%{
+          assistant_message: "Got the title.",
+          question: "Can you describe this task?",
+          draft: %Elder.Schemas.InterviewResponse.Draft{name: "Annual report task"}
+        })
 
-      send(view.pid, {:interview_done, {:ok, json}})
+      send(view.pid, {:interview_done, {:ok, response}})
 
       view
       |> element("form[phx-submit=chat_reply]")
@@ -393,11 +444,13 @@ defmodule ElderWeb.SkillRunLiveTest do
       |> element("form")
       |> render_submit(%{"user_input" => "Some brief"})
 
-      json = ~S"""
-      {"status":"continue","draft":{"name":null,"responsible_email":null,"description":null,"due_on":null},"skipped_fields":[],"assistant_message":"Hi","question":"What's the title?"}
-      """
+      response =
+        build_interview_response(%{
+          assistant_message: "Hi",
+          question: "What's the title?"
+        })
 
-      send(view.pid, {:interview_done, {:ok, json}})
+      send(view.pid, {:interview_done, {:ok, response}})
 
       view
       |> element("form[phx-submit=chat_reply]")
@@ -420,11 +473,14 @@ defmodule ElderWeb.SkillRunLiveTest do
 
       assert render(view) =~ "Thinking"
 
-      json = ~S"""
-      {"status":"continue","draft":{"name":"Report task","responsible_email":null,"description":null,"due_on":null},"skipped_fields":[],"assistant_message":"Got it — we'll use that title.","question":"Who should own it?"}
-      """
+      response =
+        build_interview_response(%{
+          assistant_message: "Got it — we'll use that title.",
+          question: "Who should own it?",
+          draft: %Elder.Schemas.InterviewResponse.Draft{name: "Report task"}
+        })
 
-      send(view.pid, {:interview_done, {:ok, json}})
+      send(view.pid, {:interview_done, {:ok, response}})
 
       html = render(view)
       assert html =~ "Got it — we&#39;ll use that title."
@@ -432,21 +488,6 @@ defmodule ElderWeb.SkillRunLiveTest do
       assert html =~ ~s(data-testid="interview-draft")
       assert html =~ ~s(data-testid="interview-question")
       assert html =~ "Who should own it?"
-      refute html =~ "Thinking"
-    end
-
-    test "interview_done invalid JSON shows friendly error unless legacy [READY]", %{conn: conn} do
-      user = insert(:user)
-      {:ok, view, _html} = live(authed_conn(conn, user), ~p"/skills/create-asana-task/run")
-
-      view
-      |> element("form")
-      |> render_submit(%{"user_input" => "Brief"})
-
-      send(view.pid, {:interview_done, {:ok, "plain text, not json"}})
-
-      html = render(view)
-      assert html =~ "could not be read"
       refute html =~ "Thinking"
     end
 
@@ -458,11 +499,19 @@ defmodule ElderWeb.SkillRunLiveTest do
       |> element("form")
       |> render_submit(%{"user_input" => "Unclear owner"})
 
-      json = ~S"""
-      {"status":"continue","draft":{"name":null,"responsible_email":null,"description":null,"due_on":null},"skipped_fields":[],"assistant_message":"Who owns this?","suggestions":[{"label":"I will own it","value":"I'll take ownership."}]}
-      """
+      response =
+        build_interview_response(%{
+          assistant_message: "Who owns this?",
+          question: "Who owns this?",
+          suggestions: [
+            %Elder.Schemas.InterviewResponse.Suggestion{
+              label: "I will own it",
+              value: "I'll take ownership."
+            }
+          ]
+        })
 
-      send(view.pid, {:interview_done, {:ok, json}})
+      send(view.pid, {:interview_done, {:ok, response}})
 
       html = render(view)
       assert html =~ "I will own it"
@@ -504,19 +553,15 @@ defmodule ElderWeb.SkillRunLiveTest do
   end
 
   describe "handle_event generate (direct structured path)" do
-    test "transitions to :processing and calls generate_object", %{conn: conn} do
+    test "transitions to :processing on form submit", %{conn: conn} do
       user = insert(:user)
       {:ok, view, _html} = live(authed_conn(conn, user), ~p"/skills/test-structured-direct/run")
 
-      expect(Elder.LLM.ClientMock, :generate_object, fn _context, _schema, _model, _topic ->
-        :ok
-      end)
+      html =
+        view
+        |> element("form")
+        |> render_submit(%{"user_input" => "Create a task for the Q4 launch"})
 
-      view
-      |> element("form")
-      |> render_submit(%{"user_input" => "Create a task for the Q4 launch"})
-
-      html = render(view)
       assert html =~ "Generating task"
     end
   end

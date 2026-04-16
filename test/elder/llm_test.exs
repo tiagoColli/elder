@@ -1,104 +1,121 @@
 defmodule Elder.LLMTest do
   use ExUnit.Case, async: false
 
-  import Mox
+  alias Elder.LLM
+  alias ExLLM.Providers.Mock
+  alias ExLLM.Types.StreamChunk
 
-  setup :set_mox_global
-  setup :verify_on_exit!
-
-  describe "stream_run/3" do
-    test "calls stream on the client with a context and the caller opt" do
-      skill = %{system_prompt: "You are a helpful writing assistant."}
-
-      expect(Elder.LLM.ClientMock, :stream, fn context, _model, opts ->
-        assert %ReqLLM.Context{} = context
-        assert Keyword.fetch!(opts, :caller) == self()
-        :ok
-      end)
-
-      assert :ok =
-               Elder.LLM.stream_run(skill, "Write a brief for the Q4 product launch",
-                 caller: self()
-               )
-    end
-
-    test "passes caller through to the client" do
-      skill = %{system_prompt: "You are a text assistant."}
-      target = self()
-
-      expect(Elder.LLM.ClientMock, :stream, fn _context, _model, opts ->
-        assert Keyword.get(opts, :caller) == target
-        :ok
-      end)
-
-      assert :ok = Elder.LLM.stream_run(skill, "Generate output", caller: target)
-    end
+  setup do
+    Mock.reset()
+    :ok
   end
 
-  describe "interview_run/3" do
-    test "calls call on the client with a context and the caller opt" do
-      review_skill = %{system_prompt: "You are a task review assistant."}
-      messages = [%{role: :user, text: "Create a handover task for the engineering team"}]
+  describe "stream_run/3" do
+    test "sends llm_token messages during streaming" do
+      Mock.set_stream_chunks([
+        %StreamChunk{content: "Hello ", finish_reason: nil},
+        %StreamChunk{content: "world", finish_reason: nil},
+        %StreamChunk{content: "", finish_reason: "stop"}
+      ])
 
-      expect(Elder.LLM.ClientMock, :call, fn context, _model, opts ->
-        assert %ReqLLM.Context{} = context
-        assert Keyword.fetch!(opts, :caller) == self()
-        :ok
-      end)
+      skill = %{system_prompt: "You are a test assistant.", slug: "test-skill"}
+      LLM.stream_run(skill, "say hello", caller: self())
 
-      assert :ok = Elder.LLM.interview_run(review_skill, messages, caller: self())
+      assert_receive {:llm_token, "Hello "}, 1000
+      assert_receive {:llm_token, "world"}, 1000
+    end
+
+    test "sends llm_done with output, cost, and model on completion" do
+      Mock.set_stream_chunks([
+        %StreamChunk{content: "done", finish_reason: nil},
+        %StreamChunk{content: "", finish_reason: "stop"}
+      ])
+
+      skill = %{system_prompt: "Test.", slug: "test-skill"}
+      LLM.stream_run(skill, "test input", caller: self())
+
+      assert_receive {:llm_done, %{output: output, cost_usd: cost, model: model}}, 1000
+      assert output == "done"
+      assert is_float(cost)
+      assert is_binary(model)
+    end
+
+    test "sends llm_error on failure" do
+      Mock.set_error({:api_error, "server error"})
+
+      skill = %{system_prompt: "Test.", slug: "test-skill"}
+      LLM.stream_run(skill, "test input", caller: self())
+
+      assert_receive {:llm_error, _reason}, 1000
     end
   end
 
   describe "structured_run/4" do
-    test "calls generate_object on the client with schema and caller" do
-      skill = %{system_prompt: "You are a helpful assistant."}
+    test "sends llm_object_done with parsed JSON object on success" do
+      json_body = Jason.encode!(%{"name" => "Test Task", "html_notes" => "<body>Notes</body>"})
+
+      Mock.set_response(%{
+        content: json_body,
+        model: "mock-model",
+        usage: %{input_tokens: 10, output_tokens: 20}
+      })
+
+      skill = %{system_prompt: "Test.", slug: "test-skill"}
       schema = %{"type" => "object", "properties" => %{"name" => %{"type" => "string"}}}
 
-      expect(Elder.LLM.ClientMock, :generate_object, fn context,
-                                                        received_schema,
-                                                        _model,
-                                                        received_opts ->
-        assert %ReqLLM.Context{} = context
-        assert received_schema == schema
-        assert Keyword.fetch!(received_opts, :caller) == self()
-        :ok
-      end)
+      LLM.structured_run(skill, "create a task", schema, caller: self())
 
-      assert :ok =
-               Elder.LLM.structured_run(skill, "Create a task", schema, caller: self())
+      assert_receive {:llm_object_done, {:ok, result}}, 1000
+      assert result.object["name"] == "Test Task"
+      assert is_float(result.cost_usd)
+      assert is_binary(result.model)
     end
 
-    test "builds context with inject_context: true by default" do
-      skill = %{system_prompt: "You are a helpful assistant."}
+    test "sends llm_object_done error on LLM failure" do
+      Mock.set_error({:api_error, "rate limited"})
+
+      skill = %{system_prompt: "Test.", slug: "test-skill"}
       schema = %{"type" => "object"}
 
-      expect(Elder.LLM.ClientMock, :generate_object, fn context, _schema, _model, _opts ->
-        [system_msg | _rest] = context.messages
-        system_text = Enum.map_join(system_msg.content, & &1.text)
-        assert String.contains?(system_text, "Today is")
-        :ok
-      end)
+      LLM.structured_run(skill, "test", schema, caller: self())
 
-      assert :ok = Elder.LLM.structured_run(skill, "input", schema, caller: self())
+      assert_receive {:llm_object_done, {:error, _reason}}, 1000
     end
 
-    test "forwards user_name opt to context builder" do
-      skill = %{system_prompt: "You are a helpful assistant."}
+    test "sends json_parse_error when response is not valid JSON" do
+      Mock.set_response(%{
+        content: "not valid json at all",
+        model: "mock-model"
+      })
+
+      skill = %{system_prompt: "Test.", slug: "test-skill"}
       schema = %{"type" => "object"}
 
-      expect(Elder.LLM.ClientMock, :generate_object, fn context, _schema, _model, _opts ->
-        [system_msg | _rest] = context.messages
-        system_text = Enum.map_join(system_msg.content, & &1.text)
-        assert String.contains?(system_text, "Alice Cardoso")
-        :ok
-      end)
+      LLM.structured_run(skill, "test", schema, caller: self())
 
-      assert :ok =
-               Elder.LLM.structured_run(skill, "input", schema,
-                 caller: self(),
-                 user_name: "Alice Cardoso"
-               )
+      assert_receive {:llm_object_done, {:error, {:json_parse_error, content}}}, 1000
+      assert content == "not valid json at all"
+    end
+
+    test "injects date/time context into system prompt by default" do
+      json_body = Jason.encode!(%{"result" => "ok"})
+
+      Mock.set_response(%{
+        content: json_body,
+        model: "mock-model"
+      })
+
+      skill = %{system_prompt: "Base prompt.", slug: "test-skill"}
+      schema = %{"type" => "object"}
+
+      LLM.structured_run(skill, "test", schema, caller: self(), user_name: "Alice")
+
+      assert_receive {:llm_object_done, {:ok, _}}, 1000
+
+      request = Mock.get_last_request()
+      system_msg = Enum.find(request.messages, &(&1[:role] == "system"))
+      assert system_msg.content =~ "Alice"
+      assert system_msg.content =~ "Base prompt."
     end
   end
 end

@@ -16,11 +16,10 @@ defmodule ElderWeb.SkillRunLive do
 
   alias Elder.Asana
   alias Elder.Asana.Artifacts.Draft
-  alias Elder.Asana.ResponseHandler
   alias Elder.Asana.TaskDraft
-  alias Elder.Chat.Conversation
-  alias Elder.Chat.Session
+  alias Elder.Interview
   alias Elder.LLM
+  alias Elder.Schemas.InterviewResponse
   alias Elder.Skills
 
   require Logger
@@ -52,7 +51,7 @@ defmodule ElderWeb.SkillRunLive do
         asana_task_url: nil,
         error: nil,
         token_count: 0,
-        session: nil,
+        interview: nil,
         chat_loading: false,
         workspaces: [],
         projects: [],
@@ -135,18 +134,12 @@ defmodule ElderWeb.SkillRunLive do
           cid: socket.id
         )
 
-        {:ok, session} =
-          Session.start(
-            review_skill,
-            input,
-            &ResponseHandler.handle/1,
-            caller: self()
-          )
+        {:ok, interview} = Interview.start(review_skill, input, caller: self())
 
         socket =
           assign(socket,
             phase: :chatting,
-            session: session,
+            interview: interview,
             chat_loading: true,
             error: nil,
             task_draft: nil
@@ -165,9 +158,9 @@ defmodule ElderWeb.SkillRunLive do
   end
 
   def handle_event("chat_reply", %{"message" => message}, socket) do
-    case Session.continue(socket.assigns.session, message) do
-      {:ok, session} ->
-        {:noreply, assign(socket, session: session, chat_loading: true, error: nil)}
+    case Interview.continue(socket.assigns.interview, message) do
+      {:ok, interview} ->
+        {:noreply, assign(socket, interview: interview, chat_loading: true, error: nil)}
 
       {:error, reason} ->
         {:noreply, assign(socket, error: "Could not send message (#{reason}). Please try again.")}
@@ -183,9 +176,9 @@ defmodule ElderWeb.SkillRunLive do
   end
 
   def handle_event("pick_suggestion", %{"message" => message}, socket) do
-    case Session.continue(socket.assigns.session, message) do
-      {:ok, session} ->
-        {:noreply, assign(socket, session: session, chat_loading: true, error: nil)}
+    case Interview.continue(socket.assigns.interview, message) do
+      {:ok, interview} ->
+        {:noreply, assign(socket, interview: interview, chat_loading: true, error: nil)}
 
       {:error, reason} ->
         {:noreply, assign(socket, error: "Could not send message (#{reason}). Please try again.")}
@@ -273,7 +266,7 @@ defmodule ElderWeb.SkillRunLive do
         asana_task_url: nil,
         error: nil,
         token_count: 0,
-        session: nil,
+        interview: nil,
         chat_loading: false,
         projects: [],
         sections: [],
@@ -380,28 +373,28 @@ defmodule ElderWeb.SkillRunLive do
     {:noreply, socket}
   end
 
-  def handle_info({:interview_done, {:ok, text}}, socket) do
-    case Session.handle_response(socket.assigns.session, text) do
-      {:ok, session, :continue} ->
-        {:noreply, assign(socket, session: session, chat_loading: false, error: nil)}
+  def handle_info({:interview_done, {:ok, %InterviewResponse{} = response}}, socket) do
+    case Interview.handle_response(socket.assigns.interview, response) do
+      {:ok, interview, :continue} ->
+        {:noreply, assign(socket, interview: interview, chat_loading: false, error: nil)}
 
-      {:ok, session, :ready} ->
+      {:ok, interview, :ready} ->
         case socket.assigns.skill.output_format do
           :structured_asana_task ->
-            if required_interview_fields_present?(session) do
-              {:noreply, interview_finish_to_structured(socket, session)}
+            if required_interview_fields_present?(interview) do
+              {:noreply, interview_finish_to_structured(socket, interview)}
             else
-              {:noreply, inject_required_fields_error(socket, session)}
+              {:noreply, inject_required_fields_error(socket, interview)}
             end
 
           _other ->
-            {:noreply, interview_finish_to_streaming(socket, session)}
+            {:noreply, interview_finish_to_streaming(socket, interview)}
         end
 
-      {:error, session, _reason} ->
+      {:error, interview, _reason} ->
         {:noreply,
          assign(socket,
-           session: session,
+           interview: interview,
            chat_loading: false,
            error: "The assistant reply could not be read. Please try again."
          )}
@@ -409,10 +402,10 @@ defmodule ElderWeb.SkillRunLive do
   end
 
   def handle_info({:interview_done, {:error, reason}}, socket) do
-    {:ok, session} = Session.handle_error(socket.assigns.session, reason)
+    {:ok, interview} = Interview.handle_error(socket.assigns.interview, reason)
 
     {:noreply,
-     assign(socket, session: session, chat_loading: false, error: format_llm_error(reason))}
+     assign(socket, interview: interview, chat_loading: false, error: format_llm_error(reason))}
   end
 
   def handle_info({:asana_workspaces_loaded, {:ok, workspaces}}, socket) do
@@ -642,15 +635,15 @@ defmodule ElderWeb.SkillRunLive do
     """
   end
 
-  defp interview_finish_to_streaming(socket, session) do
-    case Session.finish(session) do
-      {:ok, completed_session, transcript} ->
+  defp interview_finish_to_streaming(socket, interview) do
+    case Interview.finish(interview) do
+      {:ok, completed, transcript} ->
         :ok = LLM.stream_run(socket.assigns.skill, transcript, caller: self())
 
         socket
         |> assign(
           phase: :streaming,
-          session: completed_session,
+          interview: completed,
           user_input: transcript,
           error: nil,
           token_count: 0,
@@ -666,9 +659,9 @@ defmodule ElderWeb.SkillRunLive do
     end
   end
 
-  defp interview_finish_to_structured(socket, session) do
-    case Session.finish(session) do
-      {:ok, completed_session, transcript} ->
+  defp interview_finish_to_structured(socket, interview) do
+    case Interview.finish(interview) do
+      {:ok, completed, transcript} ->
         user_name = socket.assigns.current_user.name
 
         :ok =
@@ -680,7 +673,7 @@ defmodule ElderWeb.SkillRunLive do
         socket
         |> assign(
           phase: :processing,
-          session: completed_session,
+          interview: completed,
           user_input: transcript,
           error: nil,
           chat_loading: false
@@ -695,55 +688,29 @@ defmodule ElderWeb.SkillRunLive do
     end
   end
 
-  defp required_interview_fields_present?(%Session{} = session) do
-    last_message =
-      session
-      |> Session.messages()
-      |> List.last()
-
-    case last_message do
-      %{artifacts: artifacts} ->
-        case Enum.find(artifacts, &is_struct(&1, Draft)) do
-          nil ->
-            false
-
-          draft ->
-            Enum.all?(@structured_required_fields, fn field ->
-              val = Map.get(draft, field)
-              is_binary(val) and byte_size(val) > 0
-            end)
-        end
-
-      _no_messages ->
-        false
-    end
+  defp required_interview_fields_present?(%Interview{} = interview) do
+    Enum.all?(@structured_required_fields, fn field ->
+      val = Map.get(interview.draft, field)
+      is_binary(val) and byte_size(val) > 0
+    end)
   end
 
-  defp inject_required_fields_error(socket, session) do
-    draft =
-      session
-      |> Session.messages()
-      |> List.last()
-      |> then(fn %{artifacts: artifacts} -> Enum.find(artifacts, &is_struct(&1, Draft)) end)
-
+  defp inject_required_fields_error(socket, interview) do
     missing =
       @structured_required_fields
       |> Enum.reject(fn field ->
-        val = Map.get(draft, field)
+        val = Map.get(interview.draft, field)
         is_binary(val) and byte_size(val) > 0
       end)
       |> Enum.map_join(", ", &to_string/1)
 
-    {:ok, conversation} =
-      Conversation.add_assistant_message(
-        Session.conversation(session),
-        "Before we can generate the task, I still need: #{missing}. Could you provide those?",
-        artifacts: [draft]
+    updated =
+      Interview.inject_feedback(
+        interview,
+        "Before we can generate the task, I still need: #{missing}. Could you provide those?"
       )
 
-    patched_session = %{session | conversation: conversation}
-
-    assign(socket, session: patched_session, chat_loading: false)
+    assign(socket, interview: updated, chat_loading: false)
   end
 
   defp has_draft_artifact?(%{artifacts: artifacts}) do
@@ -808,7 +775,7 @@ defmodule ElderWeb.SkillRunLive do
       <div :if={@phase == :chatting}>
         <div class="space-y-5 mb-8">
           <div
-            :for={msg <- Session.messages(@session)}
+            :for={msg <- Interview.messages(@interview)}
             class={[
               "flex w-full",
               if(msg.role == :user, do: "justify-end", else: "justify-start")

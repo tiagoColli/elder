@@ -1,11 +1,7 @@
 defmodule Elder.Asana.Artifacts.Draft do
   @moduledoc """
   Structured Asana task draft built during an interview conversation.
-
-  Implements `Elder.Chat.Artifact` for transcript serialization.
   """
-
-  @behaviour Elder.Chat.Artifact
 
   @type t :: %__MODULE__{
           name: String.t() | nil,
@@ -17,7 +13,7 @@ defmodule Elder.Asana.Artifacts.Draft do
 
   defstruct [:name, :description, :responsible_email, :due_on, skipped_fields: []]
 
-  @impl Elder.Chat.Artifact
+  @spec to_transcript(t()) :: String.t() | nil
   def to_transcript(%__MODULE__{} = d) do
     fields =
       [
@@ -41,6 +37,6 @@ defmodule Elder.Asana.Artifacts.Draft do
     end
   end
 
-  @impl Elder.Chat.Artifact
+  @spec type_label() :: String.t()
   def type_label, do: "draft"
 end
