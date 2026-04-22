@@ -565,4 +565,97 @@ defmodule ElderWeb.SkillRunLiveTest do
       assert html =~ "Generating task"
     end
   end
+
+  describe "agent execution path (handle_info)" do
+    defp setup_with_task_draft(conn) do
+      user = insert(:user)
+      {:ok, view, _html} = live(authed_conn(conn, user), ~p"/skills/test-structured-direct/run")
+
+      view
+      |> element("form")
+      |> render_submit(%{"user_input" => "Agent execution test brief"})
+
+      send(view.pid, {
+        :llm_object_done,
+        {:ok,
+         %{
+           object: %{
+             "name" => "Agent test task",
+             "html_notes" => "<body><p>Agent test notes.</p></body>"
+           },
+           cost_usd: 0.002,
+           model: "google:gemini-2.5-flash"
+         }}
+      })
+
+      render(view)
+      {view, user}
+    end
+
+    test "execution_done success transitions to :asana_success and shows task URL", %{conn: conn} do
+      {view, _user} = setup_with_task_draft(conn)
+
+      task_url = "https://app.asana.com/0/123/agent-task-456"
+      send(view.pid, {:execution_done, {:ok, %{task_url: task_url}}})
+
+      html = render(view)
+      assert html =~ task_url
+      assert html =~ "View in Asana"
+      assert html =~ "Task created in Asana"
+    end
+
+    test "execution_done error shows error message and recovers to :previewing", %{conn: conn} do
+      {view, _user} = setup_with_task_draft(conn)
+
+      send(view.pid, {:execution_done, {:error, :no_task_created}})
+
+      html = render(view)
+      assert html =~ "Could not create Asana task"
+      assert html =~ "could not create the task"
+    end
+
+    test "agent_progress tool_started adds a running step without crashing", %{conn: conn} do
+      {view, _user} = setup_with_task_draft(conn)
+
+      send(view.pid, {:agent_progress, :tool_started, %{tool: "create_task"}})
+
+      _html = render(view)
+    end
+
+    test "agent_progress tool_completed marks step as done without crashing", %{conn: conn} do
+      {view, _user} = setup_with_task_draft(conn)
+
+      send(view.pid, {:agent_progress, :tool_started, %{tool: "create_task"}})
+      send(view.pid, {:agent_progress, :tool_completed, %{tool: "create_task"}})
+
+      _html = render(view)
+    end
+
+    test "multiple tool steps and execution_done success shows final result", %{conn: conn} do
+      {view, _user} = setup_with_task_draft(conn)
+
+      send(view.pid, {:agent_progress, :tool_started, %{tool: "create_task"}})
+      send(view.pid, {:agent_progress, :tool_completed, %{tool: "create_task"}})
+      send(view.pid, {:agent_progress, :tool_started, %{tool: "assign_user"}})
+      send(view.pid, {:agent_progress, :tool_completed, %{tool: "assign_user"}})
+
+      task_url = "https://app.asana.com/0/123/agent-final-789"
+      send(view.pid, {:execution_done, {:ok, %{task_url: task_url}}})
+
+      html = render(view)
+      assert html =~ task_url
+      assert html =~ "Task created in Asana"
+    end
+
+    test "execution_done error clears agent_steps", %{conn: conn} do
+      {view, _user} = setup_with_task_draft(conn)
+
+      send(view.pid, {:agent_progress, :tool_started, %{tool: "create_task"}})
+      send(view.pid, {:execution_done, {:error, "something went wrong"}})
+
+      html = render(view)
+      refute html =~ "Creating task"
+      assert html =~ "something went wrong"
+    end
+  end
 end

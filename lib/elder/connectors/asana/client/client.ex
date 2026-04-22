@@ -211,6 +211,112 @@ defmodule Elder.Asana.Client do
     end
   end
 
+  @doc "Updates fields on an existing Asana task."
+  @spec update_task(String.t(), map()) :: {:ok, %{task_gid: String.t()}} | {:error, term()}
+  def update_task(task_gid, fields) do
+    with {:ok, pat} <- fetch_pat(),
+         {:ok, %Req.Response{status: 200, body: %{"data" => data}}} <-
+           Req.put("#{@base_url}/tasks/#{task_gid}",
+             json: %{"data" => fields},
+             headers: [authorization(pat)]
+           ) do
+      Logger.info(
+        "Skills Platform | asana_update_task | task:#{task_gid} | ok",
+        feature: "Skills Platform",
+        step: "asana_update_task",
+        cid: task_gid
+      )
+
+      {:ok, %{task_gid: data["gid"]}}
+    else
+      {:error, {:missing_config, :asana_pat}} = err ->
+        Logger.error(
+          "Skills Platform | asana_update_task | task:#{task_gid} | error:missing_pat",
+          feature: "Skills Platform",
+          step: "asana_update_task",
+          cid: task_gid,
+          reason: :missing_config
+        )
+
+        err
+
+      {:ok, %Req.Response{status: status, body: body}} ->
+        Logger.error(
+          "Skills Platform | asana_update_task | task:#{task_gid} | error:#{status}",
+          feature: "Skills Platform",
+          step: "asana_update_task",
+          cid: task_gid,
+          reason: status
+        )
+
+        {:error, {:asana_api_error, status, body}}
+
+      {:error, reason} ->
+        Logger.error(
+          "Skills Platform | asana_update_task | task:#{task_gid} | error:network",
+          feature: "Skills Platform",
+          step: "asana_update_task",
+          cid: task_gid,
+          reason: :network_error
+        )
+
+        {:error, {:network_error, reason}}
+    end
+  end
+
+  @doc "Adds a tag to an existing Asana task."
+  @spec add_tag_to_task(String.t(), String.t()) :: :ok | {:error, term()}
+  def add_tag_to_task(task_gid, tag_gid) do
+    with {:ok, pat} <- fetch_pat(),
+         {:ok, %Req.Response{status: 200}} <-
+           Req.post("#{@base_url}/tasks/#{task_gid}/addTag",
+             json: %{"data" => %{"tag" => tag_gid}},
+             headers: [authorization(pat)]
+           ) do
+      Logger.info(
+        "Skills Platform | asana_add_tag | task:#{task_gid} tag:#{tag_gid} | ok",
+        feature: "Skills Platform",
+        step: "asana_add_tag",
+        cid: task_gid
+      )
+
+      :ok
+    else
+      {:error, {:missing_config, :asana_pat}} = err ->
+        Logger.error(
+          "Skills Platform | asana_add_tag | task:#{task_gid} | error:missing_pat",
+          feature: "Skills Platform",
+          step: "asana_add_tag",
+          cid: task_gid,
+          reason: :missing_config
+        )
+
+        err
+
+      {:ok, %Req.Response{status: status, body: body}} ->
+        Logger.error(
+          "Skills Platform | asana_add_tag | task:#{task_gid} | error:#{status}",
+          feature: "Skills Platform",
+          step: "asana_add_tag",
+          cid: task_gid,
+          reason: status
+        )
+
+        {:error, {:asana_api_error, status, body}}
+
+      {:error, reason} ->
+        Logger.error(
+          "Skills Platform | asana_add_tag | task:#{task_gid} | error:network",
+          feature: "Skills Platform",
+          step: "asana_add_tag",
+          cid: task_gid,
+          reason: :network_error
+        )
+
+        {:error, {:network_error, reason}}
+    end
+  end
+
   defp fetch_pat do
     case Application.fetch_env!(:elder, Elder.Asana)[:pat] do
       nil -> {:error, {:missing_config, :asana_pat}}

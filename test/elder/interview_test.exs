@@ -373,4 +373,71 @@ defmodule Elder.InterviewTest do
       refute Interview.awaiting_user?(interview)
     end
   end
+
+  describe "execute/2" do
+    test "rejects non-completed interviews" do
+      interview = start_interview()
+      target = %{workspace_gid: "ws-1", project_gid: "proj-1", section_gid: "sect-1"}
+
+      assert {:error, :not_completed} = Interview.execute(interview, target)
+    end
+
+    test "rejects awaiting_user interviews" do
+      interview = make_awaiting_user()
+      target = %{workspace_gid: "ws-1", project_gid: "proj-1", section_gid: "sect-1"}
+
+      assert {:error, :not_completed} = Interview.execute(interview, target)
+    end
+  end
+
+  describe "draft_to_context/1" do
+    test "maps Draft fields to agent context" do
+      draft = %Draft{
+        name: "Q4 Launch",
+        description: "Full campaign brief",
+        responsible_email: "owner@co.com",
+        due_on: "2026-06-01"
+      }
+
+      context = Interview.draft_to_context(draft)
+
+      assert context.name == "Q4 Launch"
+      assert context.html_notes == "<body>Full campaign brief</body>"
+      assert context.assignee_email == "owner@co.com"
+      assert context.due_on == "2026-06-01"
+    end
+
+    test "wraps description in body tags when missing" do
+      draft = %Draft{name: "Task", description: "Plain text"}
+
+      context = Interview.draft_to_context(draft)
+
+      assert context.html_notes == "<body>Plain text</body>"
+    end
+
+    test "preserves existing body tags" do
+      draft = %Draft{name: "Task", description: "<body><p>Rich</p></body>"}
+
+      context = Interview.draft_to_context(draft)
+
+      assert context.html_notes == "<body><p>Rich</p></body>"
+    end
+
+    test "handles nil description" do
+      draft = %Draft{name: "Task", description: nil}
+
+      context = Interview.draft_to_context(draft)
+
+      assert context.html_notes == "<body></body>"
+    end
+
+    test "maps nil responsible_email and due_on as nil" do
+      draft = %Draft{name: "Task", description: "x"}
+
+      context = Interview.draft_to_context(draft)
+
+      assert context.assignee_email == nil
+      assert context.due_on == nil
+    end
+  end
 end
