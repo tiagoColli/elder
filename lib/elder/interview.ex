@@ -11,6 +11,7 @@ defmodule Elder.Interview do
   """
 
   alias Elder.Asana.Artifacts.Draft
+  alias Elder.ExAgent.AsanaAgent
   alias Elder.Schemas.InterviewResponse
 
   require Logger
@@ -245,12 +246,61 @@ defmodule Elder.Interview do
   def awaiting_user?(%__MODULE__{status: :awaiting_user}), do: true
   def awaiting_user?(%__MODULE__{}), do: false
 
+  @doc """
+  Spawns an ExAgent agent to execute the Asana task from the completed draft.
+
+  Runs under `Elder.LLM.TaskSupervisor` and sends `{:execution_done, result}`
+  to the interview's `caller` when the agent finishes.
+
+  Only callable when the interview status is `:completed`.
+
+  ## Params
+    - `interview` — a completed interview with a populated draft
+    - `target` — map with `:workspace_gid`, `:project_gid`, `:section_gid`
+  """
+  @spec execute(t(), map()) :: :ok | {:error, :not_completed}
+  def execute(%__MODULE__{status: :completed, draft: draft, caller: caller} = interview, target) do
+    draft_context = draft_to_context(draft)
+    topic = agent_topic(interview.id)
+
+    Logger.info("Interview | execute | interview:#{interview.id} | spawning agent",
+      feature: "Interview",
+      step: "execute",
+      cid: interview.id
+    )
+
+    Task.Supervisor.start_child(Elder.LLM.TaskSupervisor, fn ->
+      result = AsanaAgent.run(draft_context, target, topic: topic)
+      send(caller, {:execution_done, result})
+    end)
+
+    :ok
+  end
+
+  def execute(%__MODULE__{}, _target), do: {:error, :not_completed}
+
+  @doc false
+  @spec agent_topic(String.t()) :: String.t()
+  def agent_topic(interview_id), do: "agent:#{interview_id}"
+
+  @doc false
+  @spec draft_to_context(Draft.t()) :: map()
+  def draft_to_context(%Draft{} = draft) do
+    %{
+      name: draft.name,
+      html_notes: wrap_html_notes(draft.description),
+      due_on: draft.due_on,
+      assignee_email: draft.responsible_email
+    }
+  end
+
   # --- Private ---
 
   defp dispatch_chat(%__MODULE__{} = interview) do
     if dispatch_enabled?() do
       caller = interview.caller
       session = interview.session
+      interview_id = interview.id
 
       Task.Supervisor.start_child(Elder.LLM.TaskSupervisor, fn ->
         try do
@@ -259,9 +309,12 @@ defmodule Elder.Interview do
           send(caller, {:interview_done, result})
         rescue
           e ->
-            Logger.error("Interview | dispatch_error | error:#{Exception.message(e)}",
+            Logger.error(
+              "Interview | dispatch_error | interview:#{interview_id} | error:#{Exception.message(e)}",
               feature: "Interview",
-              step: "dispatch_error"
+              step: "dispatch_error",
+              cid: interview_id,
+              reason: Exception.message(e)
             )
 
             send(caller, {:interview_done, {:error, Exception.message(e)}})
@@ -335,4 +388,12 @@ defmodule Elder.Interview do
   defp role_atom("user"), do: :user
   defp role_atom("assistant"), do: :assistant
   defp role_atom("tool"), do: :tool
+
+  defp wrap_html_notes(nil), do: "<body></body>"
+
+  defp wrap_html_notes(description) do
+    if String.starts_with?(description, "<body>"),
+      do: description,
+      else: "<body>#{description}</body>"
+  end
 end

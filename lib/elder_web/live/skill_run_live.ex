@@ -53,6 +53,7 @@ defmodule ElderWeb.SkillRunLive do
         token_count: 0,
         interview: nil,
         chat_loading: false,
+        agent_steps: [],
         workspaces: [],
         projects: [],
         sections: [],
@@ -70,7 +71,14 @@ defmodule ElderWeb.SkillRunLive do
 
     {:ok, socket}
   rescue
-    _error -> {:ok, push_navigate(socket, to: ~p"/skills")}
+    error ->
+      Logger.error("Skills Platform | mount_error | error:#{Exception.message(error)}",
+        feature: "Skills Platform",
+        step: "mount_error",
+        reason: Exception.message(error)
+      )
+
+      {:ok, push_navigate(socket, to: ~p"/skills")}
   end
 
   @impl Phoenix.LiveView
@@ -229,9 +237,8 @@ defmodule ElderWeb.SkillRunLive do
   end
 
   def handle_event("send_to_asana", _params, socket) do
-    skill_run = socket.assigns.skill_run
+    interview = socket.assigns.interview
     task_draft = socket.assigns.task_draft
-    lv_pid = self()
 
     target = %{
       workspace_gid: socket.assigns.selected_workspace_gid,
@@ -239,18 +246,27 @@ defmodule ElderWeb.SkillRunLive do
       section_gid: socket.assigns.selected_section_gid
     }
 
-    Task.start(fn ->
-      result =
-        if task_draft do
-          Asana.create_task_from_draft(task_draft, target)
-        else
-          Asana.create_task(skill_run, target)
-        end
+    if use_agent_path?(interview) do
+      topic = Interview.agent_topic(interview.id)
+      Phoenix.PubSub.subscribe(Elder.PubSub, topic)
+      :ok = Interview.execute(interview, target)
+      {:noreply, assign(socket, phase: :sending_to_asana, agent_steps: [])}
+    else
+      lv_pid = self()
 
-      send(lv_pid, {:asana_result, result})
-    end)
+      Task.start(fn ->
+        result =
+          if task_draft do
+            Asana.create_task_from_draft(task_draft, target)
+          else
+            Asana.create_task(socket.assigns.skill_run, target)
+          end
 
-    {:noreply, assign(socket, phase: :sending_to_asana)}
+        send(lv_pid, {:asana_result, result})
+      end)
+
+      {:noreply, assign(socket, phase: :sending_to_asana)}
+    end
   end
 
   def handle_event("reset", _params, socket) do
@@ -268,6 +284,7 @@ defmodule ElderWeb.SkillRunLive do
         token_count: 0,
         interview: nil,
         chat_loading: false,
+        agent_steps: [],
         projects: [],
         sections: [],
         selected_workspace_gid: nil,
@@ -322,13 +339,13 @@ defmodule ElderWeb.SkillRunLive do
 
         {:noreply, socket}
 
-      {:error, _changeset} ->
+      {:error, changeset} ->
         Logger.error(
           "Skills Platform | skill_run_save | skill:#{attrs.skill_slug} | error:changeset",
           feature: "Skills Platform",
           step: "skill_run_save",
           cid: socket.id,
-          reason: :changeset_error
+          reason: inspect(changeset.errors)
         )
 
         socket =
@@ -350,7 +367,7 @@ defmodule ElderWeb.SkillRunLive do
       feature: "Skills Platform",
       step: "llm_error",
       cid: socket.id,
-      reason: :structured_llm_error
+      reason: inspect(reason, limit: 200)
     )
 
     {:noreply, assign(socket, phase: :idle, error: format_llm_error(reason))}
@@ -362,7 +379,7 @@ defmodule ElderWeb.SkillRunLive do
       feature: "Skills Platform",
       step: "llm_error",
       cid: socket.id,
-      reason: :llm_error
+      reason: inspect(reason, limit: 200)
     )
 
     socket =
@@ -412,7 +429,14 @@ defmodule ElderWeb.SkillRunLive do
     {:noreply, assign(socket, workspaces: workspaces, asana_loading: false)}
   end
 
-  def handle_info({:asana_workspaces_loaded, {:error, _reason}}, socket) do
+  def handle_info({:asana_workspaces_loaded, {:error, reason}}, socket) do
+    Logger.warning("Skills Platform | asana_load | resource:workspaces | error:load_failed",
+      feature: "Skills Platform",
+      step: "asana_load",
+      cid: socket.id,
+      reason: inspect(reason, limit: 200)
+    )
+
     {:noreply, assign(socket, asana_loading: false, error: "Could not load Asana workspaces")}
   end
 
@@ -420,7 +444,14 @@ defmodule ElderWeb.SkillRunLive do
     {:noreply, assign(socket, projects: projects, asana_loading: false)}
   end
 
-  def handle_info({:asana_projects_loaded, {:error, _reason}}, socket) do
+  def handle_info({:asana_projects_loaded, {:error, reason}}, socket) do
+    Logger.warning("Skills Platform | asana_load | resource:projects | error:load_failed",
+      feature: "Skills Platform",
+      step: "asana_load",
+      cid: socket.id,
+      reason: inspect(reason, limit: 200)
+    )
+
     {:noreply, assign(socket, asana_loading: false, error: "Could not load Asana projects")}
   end
 
@@ -428,7 +459,14 @@ defmodule ElderWeb.SkillRunLive do
     {:noreply, assign(socket, sections: sections, asana_loading: false)}
   end
 
-  def handle_info({:asana_sections_loaded, {:error, _reason}}, socket) do
+  def handle_info({:asana_sections_loaded, {:error, reason}}, socket) do
+    Logger.warning("Skills Platform | asana_load | resource:sections | error:load_failed",
+      feature: "Skills Platform",
+      step: "asana_load",
+      cid: socket.id,
+      reason: inspect(reason, limit: 200)
+    )
+
     {:noreply, assign(socket, asana_loading: false, error: "Could not load Asana sections")}
   end
 
@@ -449,7 +487,7 @@ defmodule ElderWeb.SkillRunLive do
       feature: "Skills Platform",
       step: "asana_send",
       cid: socket.id,
-      reason: :asana_error
+      reason: inspect(reason, limit: 200)
     )
 
     recovery_phase = if socket.assigns.task_draft, do: :previewing, else: :done
@@ -461,6 +499,50 @@ defmodule ElderWeb.SkillRunLive do
      )}
   end
 
+  def handle_info({:agent_progress, :tool_started, %{tool: tool_name}}, socket) do
+    step = %{tool: tool_name, status: :running}
+    steps = Enum.reverse([step | Enum.reverse(socket.assigns.agent_steps)])
+    {:noreply, assign(socket, agent_steps: steps)}
+  end
+
+  def handle_info({:agent_progress, :tool_completed, %{tool: tool_name}}, socket) do
+    steps =
+      Enum.map(socket.assigns.agent_steps, fn
+        %{tool: ^tool_name, status: :running} -> %{tool: tool_name, status: :done}
+        step -> step
+      end)
+
+    {:noreply, assign(socket, agent_steps: steps)}
+  end
+
+  def handle_info({:execution_done, {:ok, %{task_url: url}}}, socket) do
+    Logger.info(
+      "Skills Platform | agent_execution | skill:#{socket.assigns.skill.slug} | ok",
+      feature: "Skills Platform",
+      step: "agent_execution",
+      cid: socket.id
+    )
+
+    {:noreply, assign(socket, phase: :asana_success, asana_task_url: url)}
+  end
+
+  def handle_info({:execution_done, {:error, reason}}, socket) do
+    Logger.error(
+      "Skills Platform | agent_execution | skill:#{socket.assigns.skill.slug} | error:agent",
+      feature: "Skills Platform",
+      step: "agent_execution",
+      cid: socket.id,
+      reason: inspect(reason, limit: 200)
+    )
+
+    {:noreply,
+     assign(socket,
+       phase: :previewing,
+       error: "Could not create Asana task: #{format_agent_error(reason)}",
+       agent_steps: []
+     )}
+  end
+
   defp format_asana_error({:asana_api_error, status, _detail}) when is_integer(status),
     do: "Asana returned an error (HTTP #{status}). Please try again."
 
@@ -469,6 +551,27 @@ defmodule ElderWeb.SkillRunLive do
 
   defp format_asana_error(_unknown),
     do: "An unexpected error occurred. Please try again."
+
+  defp use_agent_path?(%Interview{status: :completed}), do: true
+  defp use_agent_path?(_other), do: false
+
+  defp format_agent_error(:no_task_created),
+    do: "The agent could not create the task. Please try again."
+
+  defp format_agent_error(:max_tool_iterations_reached),
+    do: "The agent timed out. Please try again."
+
+  defp format_agent_error(reason) when is_binary(reason), do: reason
+  defp format_agent_error(_other), do: "An unexpected error occurred. Please try again."
+
+  defp tool_step_label("create_task", :running), do: "Creating task…"
+  defp tool_step_label("create_task", :done), do: "Task created"
+  defp tool_step_label("assign_user", :running), do: "Assigning user…"
+  defp tool_step_label("assign_user", :done), do: "User assigned"
+  defp tool_step_label("add_tags", :running), do: "Adding tags…"
+  defp tool_step_label("add_tags", :done), do: "Tags added"
+  defp tool_step_label(name, :running), do: "Running #{name}…"
+  defp tool_step_label(name, :done), do: "#{name} done"
 
   defp persist_structured_run(socket, raw, cost, model) do
     slug = socket.assigns.skill.slug
@@ -494,13 +597,13 @@ defmodule ElderWeb.SkillRunLive do
 
       assign(socket, skill_run: skill_run, phase: :previewing, task_draft: draft, llm_cost: cost)
     else
-      {:parse, {:error, _reason}} ->
+      {:parse, {:error, reason}} ->
         Logger.warning(
           "Skills Platform | task_draft_parse | skill:#{slug} | error:invalid",
           feature: "Skills Platform",
           step: "task_draft_parse",
           cid: socket.id,
-          reason: :invalid_task_draft
+          reason: inspect(reason, limit: 200)
         )
 
         assign(socket,
@@ -519,13 +622,13 @@ defmodule ElderWeb.SkillRunLive do
 
         assign(socket, phase: :idle, error: "Failed to process result. Please try again.")
 
-      {:save, {:error, _changeset}} ->
+      {:save, {:error, changeset}} ->
         Logger.error(
           "Skills Platform | skill_run_save | skill:#{slug} | error:changeset",
           feature: "Skills Platform",
           step: "skill_run_save",
           cid: socket.id,
-          reason: :changeset_error
+          reason: inspect(changeset.errors)
         )
 
         assign(socket, phase: :idle, error: "Failed to save result. Please try again.")
@@ -651,7 +754,15 @@ defmodule ElderWeb.SkillRunLive do
         )
         |> stream(:tokens, [], reset: true)
 
-      {:error, _reason} ->
+      {:error, reason} ->
+        Logger.warning(
+          "Skills Platform | interview_finish | skill:#{socket.assigns.skill.slug} | error:finish_failed",
+          feature: "Skills Platform",
+          step: "interview_finish",
+          cid: socket.id,
+          reason: inspect(reason, limit: 200)
+        )
+
         assign(socket,
           chat_loading: false,
           error: "Could not finalize conversation. Please try again."
@@ -680,7 +791,15 @@ defmodule ElderWeb.SkillRunLive do
         )
         |> stream(:tokens, [], reset: true)
 
-      {:error, _reason} ->
+      {:error, reason} ->
+        Logger.warning(
+          "Skills Platform | interview_finish | skill:#{socket.assigns.skill.slug} | error:finish_failed",
+          feature: "Skills Platform",
+          step: "interview_finish",
+          cid: socket.id,
+          reason: inspect(reason, limit: 200)
+        )
+
         assign(socket,
           chat_loading: false,
           error: "Could not finalize conversation. Please try again."
@@ -1009,12 +1128,32 @@ defmodule ElderWeb.SkillRunLive do
               </button>
 
               <button
-                :if={@phase == :sending_to_asana}
+                :if={@phase == :sending_to_asana and @agent_steps == []}
                 disabled
                 class="flex-1 cursor-not-allowed rounded-md bg-green-800/40 px-4 py-2.5 text-sm font-semibold text-green-400"
               >
                 Sending…
               </button>
+
+              <div
+                :if={@phase == :sending_to_asana and @agent_steps != []}
+                class="flex-1 space-y-1.5 py-1"
+              >
+                <div :for={step <- @agent_steps} class="flex items-center gap-2 text-sm">
+                  <span
+                    :if={step.status == :running}
+                    class="animate-spin inline-block w-3.5 h-3.5 border-2 border-accent border-t-transparent rounded-full"
+                  />
+                  <.icon
+                    :if={step.status == :done}
+                    name="hero-check-circle-mini"
+                    class="h-4 w-4 text-green-400"
+                  />
+                  <span class={if(step.status == :done, do: "text-green-300", else: "text-secondary")}>
+                    {tool_step_label(step.tool, step.status)}
+                  </span>
+                </div>
+              </div>
 
               <button
                 :if={@phase == :previewing}

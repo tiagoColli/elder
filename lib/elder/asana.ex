@@ -44,4 +44,12 @@ defmodule Elder.Asana do
   @spec list_sections(String.t()) ::
           {:ok, [%{gid: String.t(), name: String.t()}]} | {:error, term()}
   def list_sections(project_gid), do: @client.list_sections(project_gid)
+
+  @doc "Updates an existing Asana task's fields (e.g. assignee)."
+  @spec update_task(String.t(), map()) :: {:ok, %{task_gid: String.t()}} | {:error, term()}
+  def update_task(task_gid, fields), do: @client.update_task(task_gid, fields)
+
+  @doc "Adds a tag to an existing Asana task."
+  @spec add_tag_to_task(String.t(), String.t()) :: :ok | {:error, term()}
+  def add_tag_to_task(task_gid, tag_gid), do: @client.add_tag_to_task(task_gid, tag_gid)
 end

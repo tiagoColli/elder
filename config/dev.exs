@@ -34,7 +34,9 @@ config :elder, ElderWeb.Endpoint,
 
 config :elder, dev_routes: true
 
-config :logger, :console, format: "[$level] $message\n"
+config :logger, :console,
+  format: "$time $metadata[$level] $message\n",
+  metadata: [:request_id, :feature, :step, :cid, :reason]
 
 config :phoenix, :stacktrace_depth, 20
 config :phoenix, :plug_init_mode, :runtime
